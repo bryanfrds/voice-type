@@ -247,15 +247,6 @@ func transcribe(_ url: URL) -> String {
   return clean(String(decoding: data, as: UTF8.self))
 }
 
-// Whisper marks silence and noise as [BLANK_AUDIO] or (wind blowing); those aren't words.
-func clean(_ raw: String) -> String {
-  raw.components(separatedBy: .newlines)
-    .map { $0.replacingOccurrences(of: #"\[[^\]]*\]"#, with: "", options: .regularExpression)
-             .trimmingCharacters(in: .whitespaces) }
-    .filter { !$0.isEmpty && !($0.hasPrefix("(") && $0.hasSuffix(")")) }
-    .joined(separator: " ")
-}
-
 // The user's own clipboard, kept while a transcript sits on it, and the clipboard
 // change count of the latest transcript.
 var savedClipboard: [NSPasteboardItem]?

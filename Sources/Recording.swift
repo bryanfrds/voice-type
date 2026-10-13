@@ -90,15 +90,6 @@ final class Recording {
     }
   }
 
-  private func startedOver(from old: String, to new: String) -> Bool {
-    guard !old.isEmpty, new.count < old.count / 2 else { return false }
-    return old.split(separator: " ").first?.lowercased() != new.split(separator: " ").first?.lowercased()
-  }
-
-  private func joined(_ a: String, _ b: String) -> String {
-    a.isEmpty ? b : b.isEmpty ? a : a + " " + b
-  }
-
   // Stops the mic and closes the file so Whisper can read all of it.
   func finish() {
     active = false
