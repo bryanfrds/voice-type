@@ -29,3 +29,11 @@ func newestLines(_ tail: Data) -> Data {
   guard let cut = tail.firstIndex(of: UInt8(ascii: "\n")) else { return tail }
   return Data(tail[(cut + 1)...])
 }
+
+// A short form of a dictation for the menu: its start, cut at a word, with "…" if longer.
+func preview(_ text: String, limit: Int = 40) -> String {
+  guard text.count > limit else { return text }
+  let start = text.prefix(limit)
+  let cut = start.lastIndex(of: " ").map { start[..<$0] } ?? start
+  return cut.trimmingCharacters(in: .punctuationCharacters.union(.whitespaces)) + "…"
+}

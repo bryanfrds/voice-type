@@ -72,6 +72,8 @@ final class App: NSObject, NSApplicationDelegate {
   var limitTimer: Timer?
   var loggedWaiting = false
   var modelItems: [NSMenuItem] = []
+  let lastItem = NSMenuItem(title: "No dictation yet", action: nil, keyEquivalent: "")
+  var lastText = ""
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -88,6 +90,10 @@ final class App: NSObject, NSApplicationDelegate {
     }
     if !modelItems.isEmpty { menu.addItem(.separator()) }
     markPickedModel()
+
+    lastItem.target = self
+    menu.addItem(lastItem)
+    menu.addItem(.separator())
     menu.addItem(withTitle: "Quit VoiceType", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
     statusItem.menu = menu
     trimLog()
@@ -218,7 +224,10 @@ final class App: NSObject, NSApplicationDelegate {
       try? FileManager.default.removeItem(at: url)
       DispatchQueue.main.async {
         self.hideBubble()
-        if !text.isEmpty { paste(text + " ") }
+        if !text.isEmpty {
+          paste(text + " ")
+          self.remember(text)
+        }
         self.state = .idle
         self.show("mic", tint: nil)
         self.recheckModifiers()  // Ctrl + Option may already be held for the next sentence
@@ -237,6 +246,18 @@ final class App: NSObject, NSApplicationDelegate {
     for item in modelItems {
       item.state = (item.representedObject as? String).map { modelDir + $0 } == inUse ? .on : .off
     }
+}
+
+  // The menu keeps the last dictation, so it can be copied again if the paste went astray.
+  func remember(_ text: String) {
+    lastText = text
+    lastItem.title = "Copy “\(preview(text))”"
+    lastItem.action = #selector(copyLast)
+  }
+
+  @objc func copyLast() {
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(lastText, forType: .string)
   }
 
   func hideBubble() {
