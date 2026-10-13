@@ -11,6 +11,15 @@ for tool in launchctl pkill security; do
   printf '#!/bin/bash\necho "%s $*" >> "%s/calls"\n' "$tool" "$sandbox" > "$sandbox/bin/$tool"
   chmod +x "$sandbox/bin/$tool"
 done
+# With FAKE_CERT=stuck, the stand-in security finds a VoiceType certificate but can't delete it.
+cat >> "$sandbox/bin/security" <<'STUB'
+if [ "${FAKE_CERT:-}" = stuck ]; then
+  case "$1" in
+    find-identity) echo '  1) ABCDEF "VoiceType Local Signing"' ;;
+    delete-identity) exit 1 ;;
+  esac
+fi
+STUB
 fresh_home() {
   rm -rf "$sandbox/home" "$sandbox/calls"
   mkdir -p "$sandbox/home/Applications/VoiceType.app" "$sandbox/home/Library/LaunchAgents" \
@@ -22,7 +31,10 @@ run() { HOME="$sandbox/home" PATH="$sandbox/bin:$PATH" ./uninstall.sh "$@" >/dev
 
 fails=0
 check() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: got $2, wanted $3"; fails=$((fails + 1)); fi; }
-untouched() { [ -d "$sandbox/home/Applications/VoiceType.app" ] && [ ! -f "$sandbox/calls" ] && echo yes || echo no; }
+untouched() {
+  [ -d "$sandbox/home/Applications/VoiceType.app" ] && [ -f "$sandbox/home/Library/LaunchAgents/com.bryanfrds.voice-type.plist" ] \
+    && [ -d "$sandbox/home/.local/share/voice-type" ] && [ ! -f "$sandbox/calls" ] && echo yes || echo no
+}
 
 for bad in "--model" "--models --typo" "--typo --models" "extra words"; do
   fresh_home
@@ -41,5 +53,14 @@ check "no options looks for the certificate" "$(grep -c '^security find-identity
 fresh_home
 run --models
 check "--models removes the models" "$([ -e "$sandbox/home/.local/share/voice-type" ] && echo kept || echo gone)" gone
+
+fresh_home
+status=0
+out=$(FAKE_CERT=stuck HOME="$sandbox/home" PATH="$sandbox/bin:$PATH" ./uninstall.sh 2>&1) || status=$?
+check "a stuck certificate doesn't stop the uninstall" "$status" 0
+check "the app is still removed" "$([ -e "$sandbox/home/Applications/VoiceType.app" ] && echo kept || echo gone)" gone
+check "it tried to delete by hash" "$(grep -cx 'security delete-identity -Z ABCDEF' "$sandbox/calls")" 1
+check "it warns the certificate may be left" "$(grep -c 'may still be in your login keychain' <<<"$out")" 1
+check "remove-cert.sh reports the failure" "$(FAKE_CERT=stuck PATH="$sandbox/bin:$PATH" ./remove-cert.sh >/dev/null 2>&1; echo $?)" 1
 
 [ "$fails" -eq 0 ] && echo "all passed"
