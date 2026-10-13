@@ -57,6 +57,15 @@ check("a cut that lands on the last line break leaves nothing", newestLines(data
 check("no line break keeps everything", newestLines(data("one long line")), data("one long line"))
 check("multi-byte text after the cut stays whole", newestLines(data("é\nnaïve café\n")), data("naïve café\n"))
 
+check("a short dictation is shown whole", preview("Hello there."), "Hello there.")
+check("a long one is cut at a word, keeping a word that ends at the cut", preview("Can you check whether the pull request merged and then play it", limit: 30),
+      "Can you check whether the pull…")
+check("trailing punctuation goes before the …", preview("One, two, three, four, five, six", limit: 17), "One, two, three…")
+check("one long word is cut where it must be", preview("Supercalifragilistic", limit: 10), "Supercalif…")
+check("a cut between two words keeps the last one", preview("Hello world, again", limit: 12), "Hello world…")
+check("an opening quote is kept", preview("\"Quoted\" words here and more", limit: 15), "\"Quoted\" words…")
+check("all punctuation before the cut shows the uncut start", preview("... ... more words", limit: 5), "... .…")
+
 if failures > 0 {
   print("\(failures) failed")
   exit(1)
