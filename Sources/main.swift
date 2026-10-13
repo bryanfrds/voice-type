@@ -33,6 +33,8 @@ let transcribeTimeout: TimeInterval = 60
 let tempPrefix = NSTemporaryDirectory() + "voice-type-"
 
 let logURL = URL(fileURLWithPath: home + "/Library/Logs/voice-type.log")
+// The log is cut back to its newest part at launch once it passes this size.
+let logLimit = 1_000_000
 
 func log(_ message: String) {
   let line = Data("\(Date()) \(message)\n".utf8)
@@ -43,6 +45,16 @@ func log(_ message: String) {
   } else {
     try? line.write(to: logURL)
   }
+}
+
+// Cuts the log back to its newest part, reading only that part of the file.
+func trimLog() {
+  guard let size = (try? FileManager.default.attributesOfItem(atPath: logURL.path))?[.size] as? Int,
+        size > logLimit, let file = try? FileHandle(forReadingFrom: logURL) else { return }
+  try? file.seek(toOffset: UInt64(size - logLimit / 2))
+  let tail = (try? file.readToEnd()) ?? Data()
+  try? file.close()
+  try? newestLines(tail).write(to: logURL, options: .atomic)
 }
 
 enum State { case idle, recording, transcribing }
@@ -78,6 +90,7 @@ final class App: NSObject, NSApplicationDelegate {
     markPickedModel()
     menu.addItem(withTitle: "Quit VoiceType", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
     statusItem.menu = menu
+    trimLog()
     removeLeftoverRecordings()
 
     guard whisperPath != nil, let path = modelPath(), FileManager.default.fileExists(atPath: path) else {
