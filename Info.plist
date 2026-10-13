@@ -10,5 +10,6 @@
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>LSUIElement</key><true/>
   <key>NSMicrophoneUsageDescription</key><string>VoiceType listens while you hold Ctrl + Option and turns your speech into text.</string>
+  <key>NSSpeechRecognitionUsageDescription</key><string>VoiceType shows your words in a bubble while you speak.</string>
 </dict>
 </plist>

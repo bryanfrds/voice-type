@@ -1,7 +1,9 @@
-// VoiceType: hold Ctrl + Option, talk, let go. The speech is turned into text on this Mac
-// by whisper.cpp and pasted wherever the cursor is.
+// VoiceType: hold Ctrl + Option, talk, let go. The words show in a bubble as you speak; on
+// letting go, whisper.cpp turns the speech into text on this Mac and it's pasted wherever the
+// cursor is.
 import AppKit
 import AVFoundation
+import Speech
 
 let home = FileManager.default.homeDirectoryForCurrentUser.path
 let modelPath = ProcessInfo.processInfo.environment["VOICE_TYPE_MODEL"]
@@ -37,7 +39,10 @@ enum State { case idle, recording, transcribing }
 final class App: NSObject, NSApplicationDelegate {
   var statusItem: NSStatusItem!
   var tap: CFMachPort?
-  var recorder: AVAudioRecorder?
+  var recording: Recording?
+  let bubble = Bubble()
+  var words = ""
+  var bubbleShown = false
   var state = State.idle
   var startedAt = Date()
   var feedbackTimer: Timer?
@@ -61,6 +66,10 @@ final class App: NSObject, NSApplicationDelegate {
     show("mic", tint: nil)
     AVCaptureDevice.requestAccess(for: .audio) { granted in
       if !granted { log("microphone access was refused") }
+    }
+    // Only the live words in the bubble need this; without it the final text still works.
+    SFSpeechRecognizer.requestAuthorization { status in
+      if status != .authorized { log("speech recognition not allowed; the bubble won't show words") }
     }
     // Watching the keys needs Input Monitoring; pasting needs Accessibility. Ask for both.
     let prompt = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
@@ -121,21 +130,20 @@ final class App: NSObject, NSApplicationDelegate {
 
   func startRecording() {
     let url = URL(fileURLWithPath: tempPrefix + "\(UUID().uuidString).wav")
-    let settings: [String: Any] = [
-      AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 16000, AVNumberOfChannelsKey: 1,
-      AVLinearPCMBitDepthKey: 16, AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false,
-    ]
-    guard let recorder = try? AVAudioRecorder(url: url, settings: settings), recorder.record() else {
-      log("could not start recording")
-      try? FileManager.default.removeItem(at: url)
-      return
-    }
-    self.recorder = recorder
+    words = ""
+    guard let recording = Recording(url: url, onWords: { [weak self] words in
+      guard let self, self.state == .recording else { return }
+      self.words = words
+      if self.bubbleShown { self.bubble.show(words) }
+    }) else { return }
+    self.recording = recording
     state = .recording
     startedAt = Date()
     feedbackTimer = Timer.scheduledTimer(withTimeInterval: feedbackDelay, repeats: false) { _ in
       self.show("mic.fill", tint: .systemRed)
       NSSound(named: "Tink")?.play()
+      self.bubbleShown = true
+      if self.words.isEmpty { self.bubble.show("Listening…", dim: true) } else { self.bubble.show(self.words) }
     }
     limitTimer = Timer.scheduledTimer(withTimeInterval: maximumHold, repeats: false) { _ in
       log("stopped a recording that ran past \(Int(maximumHold))s")
@@ -146,37 +154,42 @@ final class App: NSObject, NSApplicationDelegate {
   func cancelRecording() {
     feedbackTimer?.invalidate()
     limitTimer?.invalidate()
-    if let recorder {
-      recorder.stop()
-      recorder.deleteRecording()
-    }
-    recorder = nil
+    recording?.discard()
+    recording = nil
     state = .idle
     show("mic", tint: nil)
+    hideBubble()
   }
 
   func stopRecording() {
-    guard let recorder, Date().timeIntervalSince(startedAt) >= minimumHold else {
+    guard let recording, Date().timeIntervalSince(startedAt) >= minimumHold else {
       cancelRecording()
       return
     }
     feedbackTimer?.invalidate()
     limitTimer?.invalidate()
-    recorder.stop()
-    self.recorder = nil
+    recording.finish()
+    self.recording = nil
     state = .transcribing
     show("ellipsis", tint: nil)
-    let url = recorder.url
+    if bubbleShown { bubble.show(words.isEmpty ? "…" : words + " …", dim: true) }
+    let url = recording.url
     DispatchQueue.global(qos: .userInitiated).async {
       let text = transcribe(url)
       try? FileManager.default.removeItem(at: url)
       DispatchQueue.main.async {
+        self.hideBubble()
         if !text.isEmpty { paste(text + " ") }
         self.state = .idle
         self.show("mic", tint: nil)
         self.recheckModifiers()  // Ctrl + Option may already be held for the next sentence
       }
     }
+  }
+
+  func hideBubble() {
+    bubble.hide()
+    bubbleShown = false
   }
 
   func show(_ symbol: String, tint: NSColor?) {
