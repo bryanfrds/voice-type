@@ -37,3 +37,4 @@ whisper.cpp or the model is missing.
 - The final text uses `ggml-large-v3-turbo-q5_0.bin` from `~/.local/share/voice-type` if it
   is there, otherwise `ggml-small.en.bin`. Set `VOICE_TYPE_MODEL` to use another model file.
 - Log: `~/Library/Logs/voice-type.log`. To remove VoiceType, run `./uninstall.sh`.
+- Tests for the text handling: `tests/run.sh`.
