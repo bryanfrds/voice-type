@@ -59,7 +59,7 @@ func trimLog() {
   try? newestLines(tail).write(to: logURL, options: .atomic)
 }
 
-final class App: NSObject, NSApplicationDelegate {
+final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
   var statusItem: NSStatusItem!
   var tap: CFMachPort?
   var recording: Recording?
@@ -75,11 +75,18 @@ final class App: NSObject, NSApplicationDelegate {
   let lastItem = NSMenuItem(title: "No dictation yet", action: nil, keyEquivalent: "")
   var lastText = ""
   var pasteCancelled = false
+  let warningItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+  var warningPane = ""
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     let menu = NSMenu()
     menu.addItem(withTitle: "Hold Ctrl + Option to talk", action: nil, keyEquivalent: "")
+    warningItem.target = self
+    warningItem.action = #selector(openWarningPane)
+    warningItem.isHidden = true
+    menu.addItem(warningItem)
+    menu.delegate = self
     menu.addItem(.separator())
     let downloaded = downloadedModels()
     for model in models where downloaded.contains(model.file) {
@@ -177,6 +184,10 @@ final class App: NSObject, NSApplicationDelegate {
   }
 
   func startRecording() {
+    guard checkPermissions() else {
+      log("not recording: microphone access is off")
+      return
+    }
     hideBubble()  // clears a note left from the last dictation
     let url = URL(fileURLWithPath: tempPrefix + "\(UUID().uuidString).wav")
     words = ""
@@ -273,6 +284,27 @@ final class App: NSObject, NSApplicationDelegate {
   @objc func copyLast() {
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(lastText, forType: .string)
+  }
+
+  // Shows a menu warning for a permission that's been turned off. False when the mic is off,
+  // since a recording would only be silence.
+  @discardableResult
+  func checkPermissions() -> Bool {
+    let warning = permissionWarning(mic: AVCaptureDevice.authorizationStatus(for: .audio),
+                                    speech: SFSpeechRecognizer.authorizationStatus())
+    warningItem.isHidden = warning == nil
+    warningItem.title = warning.map { "⚠️ " + $0.title } ?? ""
+    warningPane = warning?.pane ?? ""
+    if warning?.blocksRecording == true { show("mic.slash", tint: .systemOrange) }
+    return warning?.blocksRecording != true
+  }
+
+  func menuNeedsUpdate(_ menu: NSMenu) {
+    if checkPermissions() && state == .idle && tap != nil { show("mic", tint: nil) }
+  }
+
+  @objc func openWarningPane() {
+    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?\(warningPane)")!)
   }
 
   func hideBubble() {
