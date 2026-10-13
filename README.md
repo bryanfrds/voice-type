@@ -3,6 +3,8 @@
 Hold **Ctrl + Option**, talk, and let go. Your words show in a bubble as you speak, then the
 text is typed wherever the cursor is.
 
+![The VoiceType bubble showing words as they are spoken](docs/bubble.png)
+
 The speech is turned into text on your Mac by [whisper.cpp](https://github.com/ggml-org/whisper.cpp),
 so nothing is uploaded. A short sentence takes about half a second. The live words in the
 bubble come from Apple’s on-device speech recognition, which is quicker but less accurate,
