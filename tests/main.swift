@@ -1,4 +1,5 @@
-// Checks for Sources/Text.swift. Run with tests/run.sh.
+// Checks for Sources/Text.swift and Sources/Keyboard.swift. Run with tests/run.sh.
+import Carbon
 import Foundation
 var failures = 0
 
@@ -30,6 +31,17 @@ check("first words compare without case", startedOver(from: "and then we went ho
 check("joining two parts", joined("One.", "Two."), "One. Two.")
 check("joining onto nothing", joined("", "Two."), "Two.")
 check("joining nothing on", joined("One.", ""), "One.")
+
+// Where Cmd + V is on layouts that ship with macOS, looked up without switching to them.
+func layout(_ id: String) -> TISInputSource? {
+  let filter = [kTISPropertyInputSourceID as String: id] as CFDictionary
+  return (TISCreateInputSourceList(filter, true)?.takeRetainedValue() as? [TISInputSource])?.first
+}
+for (id, name, want) in [("com.apple.keylayout.US", "U.S.", 9), ("com.apple.keylayout.Dvorak", "Dvorak", 47),
+                         ("com.apple.keylayout.DVORAK-QWERTYCMD", "Dvorak - QWERTY ⌘", 9),
+                         ("com.apple.keylayout.French", "French", 9), ("com.apple.keylayout.Russian", "Russian", 9)] {
+  check("Cmd + V on \(name) is key \(want)", layout(id).flatMap { keyCode(for: "v", layout: $0) }.map(Int.init), want)
+}
 
 if failures > 0 {
   print("\(failures) failed")

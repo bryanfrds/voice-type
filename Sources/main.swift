@@ -272,8 +272,9 @@ func paste(_ text: String) {
   let ours = board.changeCount
   latestPaste = ours
   let source = CGEventSource(stateID: .combinedSessionState)
+  let v = keyCode(for: "v") ?? 9  // 9 is where V sits on QWERTY
   for down in [true, false] {
-    let event = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: down)  // 9 is V
+    let event = CGEvent(keyboardEventSource: source, virtualKey: v, keyDown: down)
     event?.flags = .maskCommand
     event?.post(tap: .cghidEventTap)
   }
