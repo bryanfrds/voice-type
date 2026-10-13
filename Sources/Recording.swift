@@ -76,7 +76,11 @@ final class Recording {
   private func handle(_ result: SFSpeechRecognitionResult?, _ error: Error?) {
     guard active else { return }
     if let result {
-      latest = result.bestTranscription.formattedString
+      let words = result.bestTranscription.formattedString
+      // After a pause the recognizer can start over within the same pass, without saying
+      // so. A result much shorter than the last one, starting differently, is that.
+      if startedOver(from: latest, to: words) { earlier = joined(earlier, latest) }
+      latest = words
       onWords(joined(earlier, latest))
     }
     if result?.isFinal == true || error != nil {
@@ -84,6 +88,11 @@ final class Recording {
       latest = ""
       startPass()
     }
+  }
+
+  private func startedOver(from old: String, to new: String) -> Bool {
+    guard !old.isEmpty, new.count < old.count / 2 else { return false }
+    return old.split(separator: " ").first?.lowercased() != new.split(separator: " ").first?.lowercased()
   }
 
   private func joined(_ a: String, _ b: String) -> String {
