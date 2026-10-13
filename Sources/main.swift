@@ -3,6 +3,7 @@
 // cursor is.
 import AppKit
 import AVFoundation
+import Carbon
 import Speech
 
 let home = FileManager.default.homeDirectoryForCurrentUser.path
@@ -272,8 +273,9 @@ func paste(_ text: String) {
   let ours = board.changeCount
   latestPaste = ours
   let source = CGEventSource(stateID: .combinedSessionState)
+  let v = keyCode(for: "v") ?? 9  // 9 is where V sits on QWERTY
   for down in [true, false] {
-    let event = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: down)  // 9 is V
+    let event = CGEvent(keyboardEventSource: source, virtualKey: v, keyDown: down)
     event?.flags = .maskCommand
     event?.post(tap: .cghidEventTap)
   }
@@ -286,6 +288,27 @@ func paste(_ text: String) {
     }
     // If the count moved, the user copied something new; keep that.
     savedClipboard = nil
+  }
+}
+
+// The key that types `character` on the current keyboard layout. Cmd + V is matched by the
+// letter, so on Dvorak or AZERTY the paste has to press wherever V is there.
+func keyCode(for character: String) -> CGKeyCode? {
+  guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
+        let pointer = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else { return nil }
+  let data = Unmanaged<CFData>.fromOpaque(pointer).takeUnretainedValue() as Data
+  return data.withUnsafeBytes { bytes -> CGKeyCode? in
+    guard let layout = bytes.baseAddress?.assumingMemoryBound(to: UCKeyboardLayout.self) else { return nil }
+    for code in 0..<128 {
+      var deadKeys: UInt32 = 0
+      var length = 0
+      var chars = [UniChar](repeating: 0, count: 4)
+      let status = UCKeyTranslate(layout, UInt16(code), UInt16(kUCKeyActionDown), 0,
+                                  UInt32(LMGetKbdType()), OptionBits(kUCKeyTranslateNoDeadKeysBit),
+                                  &deadKeys, chars.count, &length, &chars)
+      if status == noErr, String(utf16CodeUnits: chars, count: length) == character { return CGKeyCode(code) }
+    }
+    return nil
   }
 }
 
