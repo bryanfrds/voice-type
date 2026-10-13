@@ -30,6 +30,8 @@ let feedbackDelay: TimeInterval = 0.15
 let maximumHold: TimeInterval = 120
 // whisper-cli is stopped if it takes longer than this.
 let transcribeTimeout: TimeInterval = 60
+// How long a note like "Didn't catch that" stays in the bubble.
+let noteDuration: TimeInterval = 1.5
 let tempPrefix = NSTemporaryDirectory() + "voice-type-"
 
 let logURL = URL(fileURLWithPath: home + "/Library/Logs/voice-type.log")
@@ -68,6 +70,7 @@ final class App: NSObject, NSApplicationDelegate {
   var startedAt = Date()
   var feedbackTimer: Timer?
   var limitTimer: Timer?
+  var hideTimer: Timer?
   var loggedWaiting = false
   var modelItems: [NSMenuItem] = []
   let lastItem = NSMenuItem(title: "No dictation yet", action: nil, keyEquivalent: "")
@@ -229,8 +232,10 @@ final class App: NSObject, NSApplicationDelegate {
                  held, text.count, Date().timeIntervalSince(began)))
       try? FileManager.default.removeItem(at: url)
       DispatchQueue.main.async {
-        self.hideBubble()
-        if !text.isEmpty {
+        if text.isEmpty {
+          self.say("Didn't catch that")
+        } else {
+          self.hideBubble()
           if !self.pasteCancelled { paste(text + " ") }
           self.remember(text)  // kept even after Esc, in case it was a mistake
         }
@@ -267,8 +272,19 @@ final class App: NSObject, NSApplicationDelegate {
   }
 
   func hideBubble() {
+    hideTimer?.invalidate()
     bubble.hide()
     bubbleShown = false
+  }
+
+  // Shows a short note in the bubble, then hides it, unless a new recording has taken over.
+  func say(_ note: String) {
+    bubble.show(note, dim: true)
+    bubbleShown = true
+    hideTimer?.invalidate()
+    hideTimer = Timer.scheduledTimer(withTimeInterval: noteDuration, repeats: false) { _ in
+      if self.state != .recording { self.hideBubble() }
+    }
   }
 
   func show(_ symbol: String, tint: NSColor?) {
