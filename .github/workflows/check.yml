@@ -1,0 +1,14 @@
+name: check
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  check:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Type-check the app
+        run: swiftc -swift-version 5 -typecheck Sources/*.swift
+      - name: Run the tests
+        run: tests/run.sh
