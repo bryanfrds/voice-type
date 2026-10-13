@@ -27,6 +27,7 @@ Accessibility to see the keys and to paste.
 - **Let go**, and the mic changes to dots while your speech becomes text. Then the text is pasted with a space after it.
 - Holds shorter than a third of a second are ignored. Pressing any other key while
   holding Ctrl + Option cancels, so shortcuts that use those keys still work.
+- Press **Esc** after letting go, while the dots show, to skip pasting the dictation. It is still in the menu to copy if you change your mind.
 - Your clipboard is put back after each paste.
 
 An orange crossed-out mic means VoiceType is still waiting for Accessibility, or that

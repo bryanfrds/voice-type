@@ -30,6 +30,7 @@ let feedbackDelay: TimeInterval = 0.15
 let maximumHold: TimeInterval = 120
 // whisper-cli is stopped if it takes longer than this.
 let transcribeTimeout: TimeInterval = 60
+let escapeKey: Int64 = 53  // the same on every layout
 let tempPrefix = NSTemporaryDirectory() + "voice-type-"
 
 let logURL = URL(fileURLWithPath: home + "/Library/Logs/voice-type.log")
@@ -74,6 +75,7 @@ final class App: NSObject, NSApplicationDelegate {
   var modelItems: [NSMenuItem] = []
   let lastItem = NSMenuItem(title: "No dictation yet", action: nil, keyEquivalent: "")
   var lastText = ""
+  var pasteCancelled = false
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -164,9 +166,16 @@ final class App: NSObject, NSApplicationDelegate {
     modifiersChanged(CGEventSource.flagsState(.combinedSessionState))
   }
 
-  // A key or click while Ctrl + Option is held means a shortcut, not talking.
-  func otherInput() {
-    if state == .recording { cancelRecording() }
+  // A key or click while Ctrl + Option is held means a shortcut, not talking. Esc after
+  // letting go, while the speech is still being turned into text, means "don't paste".
+  func otherInput(key: Int64? = nil) {
+    if state == .recording {
+      cancelRecording()
+    } else if state == .transcribing && key == escapeKey {
+      pasteCancelled = true
+      hideBubble()
+      log("paste cancelled with Esc")
+    }
   }
 
   func startRecording() {
@@ -212,6 +221,7 @@ final class App: NSObject, NSApplicationDelegate {
     recording.finish()
     self.recording = nil
     state = .transcribing
+    pasteCancelled = false
     show("ellipsis", tint: nil)
     if bubbleShown { bubble.show(words.isEmpty ? "…" : words + " …", dim: true) }
     let url = recording.url
@@ -225,8 +235,8 @@ final class App: NSObject, NSApplicationDelegate {
       DispatchQueue.main.async {
         self.hideBubble()
         if !text.isEmpty {
-          paste(text + " ")
-          self.remember(text)
+          if !self.pasteCancelled { paste(text + " ") }
+          self.remember(text)  // kept even after Esc, in case it was a mistake
         }
         self.state = .idle
         self.show("mic", tint: nil)
@@ -284,7 +294,8 @@ let onEvent: CGEventTapCallBack = { _, type, event, _ in
     if let tap = app.tap { CGEvent.tapEnable(tap: tap, enable: true) }
     app.recheckModifiers()
   case .flagsChanged: app.modifiersChanged(event.flags)
-  case .keyDown, .leftMouseDown, .rightMouseDown: app.otherInput()
+  case .keyDown: app.otherInput(key: event.getIntegerValueField(.keyboardEventKeycode))
+  case .leftMouseDown, .rightMouseDown: app.otherInput()
   default: break
   }
   return Unmanaged.passUnretained(event)
