@@ -18,7 +18,8 @@ add_identity() {  # $1: certificate name, $2: file prefix
     || openssl pkcs12 -export -inkey "$dir/$2.key" -in "$dir/$2.pem" -out "$dir/$2.p12" -passout pass:x
   security import "$dir/$2.p12" -k "$keychain" -P x >/dev/null
 }
-count() { security find-identity "$keychain" | grep -c "\"$1\"" || true; }
+# Distinct identities with exactly this name (a trusted one is listed twice).
+count() { security find-identity "$keychain" | grep -F "\"$1\"" | awk '{print $2}' | sort -u | wc -l | tr -d " "; }
 
 add_identity "VoiceType Local Signing" one
 add_identity "VoiceType Local Signing" two

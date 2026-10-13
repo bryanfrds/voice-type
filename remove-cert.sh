@@ -3,6 +3,7 @@
 # created. With a keychain path, only that keychain is searched; tests use a throwaway one.
 # Deleting by hash means a similarly named certificate is never touched.
 keychain=("$@")
+failed=0
 hashes=$(security find-identity "${keychain[@]}" 2>/dev/null \
   | awk '/"VoiceType Local Signing"/ {print $2}' | sort -u)
 for hash in $hashes; do
@@ -10,5 +11,7 @@ for hash in $hashes; do
     echo "Removed the VoiceType signing certificate."
   else
     echo "Could not remove a VoiceType signing certificate; delete it in Keychain Access."
+    failed=1
   fi
 done
+exit "$failed"
