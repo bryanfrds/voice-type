@@ -33,7 +33,12 @@ func newestLines(_ tail: Data) -> Data {
 // A short form of a dictation for the menu: its start, cut at a word, with "…" if longer.
 func preview(_ text: String, limit: Int = 40) -> String {
   guard text.count > limit else { return text }
-  let start = text.prefix(limit)
-  let cut = start.lastIndex(of: " ").map { start[..<$0] } ?? start
-  return cut.trimmingCharacters(in: .punctuationCharacters.union(.whitespaces)) + "…"
+  let uncut = text.prefix(limit)
+  var start = uncut
+  // Back up to a word boundary, unless the cut already falls on one.
+  if text.dropFirst(limit).first != " ", let space = start.lastIndex(of: " ") { start = start[..<space] }
+  // Trailing punctuation and spaces read badly before the "…"; leading ones are kept.
+  var end = start
+  while let last = end.last, last.isPunctuation || last.isWhitespace { end = end.dropLast() }
+  return (end.isEmpty ? uncut : end) + "…"
 }
