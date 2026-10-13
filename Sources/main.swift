@@ -70,7 +70,6 @@ final class App: NSObject, NSApplicationDelegate {
   var startedAt = Date()
   var feedbackTimer: Timer?
   var limitTimer: Timer?
-  var hideTimer: Timer?
   var loggedWaiting = false
   var modelItems: [NSMenuItem] = []
   let lastItem = NSMenuItem(title: "No dictation yet", action: nil, keyEquivalent: "")
@@ -178,6 +177,7 @@ final class App: NSObject, NSApplicationDelegate {
   }
 
   func startRecording() {
+    hideBubble()  // clears a note left from the last dictation
     let url = URL(fileURLWithPath: tempPrefix + "\(UUID().uuidString).wav")
     words = ""
     guard let recording = Recording(url: url, onWords: { [weak self] words in
@@ -272,19 +272,13 @@ final class App: NSObject, NSApplicationDelegate {
   }
 
   func hideBubble() {
-    hideTimer?.invalidate()
     bubble.hide()
     bubbleShown = false
   }
 
-  // Shows a short note in the bubble, then hides it, unless a new recording has taken over.
+  // Shows a short note in the bubble for a moment. Anything shown after it cancels the hide.
   func say(_ note: String) {
-    bubble.show(note, dim: true)
-    bubbleShown = true
-    hideTimer?.invalidate()
-    hideTimer = Timer.scheduledTimer(withTimeInterval: noteDuration, repeats: false) { _ in
-      if self.state != .recording { self.hideBubble() }
-    }
+    bubble.show(note, dim: true, hidingAfter: noteDuration)
   }
 
   func show(_ symbol: String, tint: NSColor?) {
