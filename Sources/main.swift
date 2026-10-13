@@ -30,7 +30,6 @@ let feedbackDelay: TimeInterval = 0.15
 let maximumHold: TimeInterval = 120
 // whisper-cli is stopped if it takes longer than this.
 let transcribeTimeout: TimeInterval = 60
-let escapeKey: Int64 = 53  // the same on every layout
 let tempPrefix = NSTemporaryDirectory() + "voice-type-"
 
 let logURL = URL(fileURLWithPath: home + "/Library/Logs/voice-type.log")
@@ -57,8 +56,6 @@ func trimLog() {
   try? file.close()
   try? newestLines(tail).write(to: logURL, options: .atomic)
 }
-
-enum State { case idle, recording, transcribing }
 
 final class App: NSObject, NSApplicationDelegate {
   var statusItem: NSStatusItem!
@@ -166,15 +163,14 @@ final class App: NSObject, NSApplicationDelegate {
     modifiersChanged(CGEventSource.flagsState(.combinedSessionState))
   }
 
-  // A key or click while Ctrl + Option is held means a shortcut, not talking. Esc after
-  // letting go, while the speech is still being turned into text, means "don't paste".
   func otherInput(key: Int64? = nil) {
-    if state == .recording {
-      cancelRecording()
-    } else if state == .transcribing && key == escapeKey {
+    switch reaction(to: key, in: state) {
+    case .cancelRecording: cancelRecording()
+    case .cancelPaste:
       pasteCancelled = true
       hideBubble()
       log("paste cancelled with Esc")
+    case .ignore: break
     }
   }
 

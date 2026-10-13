@@ -66,6 +66,15 @@ check("a cut between two words keeps the last one", preview("Hello world, again"
 check("an opening quote is kept", preview("\"Quoted\" words here and more", limit: 15), "\"Quoted\" words…")
 check("all punctuation before the cut shows the uncut start", preview("... ... more words", limit: 5), "... .…")
 
+let aKey: Int64 = 0
+check("any key while recording cancels it", reaction(to: aKey, in: .recording), .cancelRecording)
+check("Esc while recording cancels it too", reaction(to: escapeKey, in: .recording), .cancelRecording)
+check("a click while recording cancels it", reaction(to: nil, in: .recording), .cancelRecording)
+check("Esc while transcribing cancels the paste", reaction(to: escapeKey, in: .transcribing), .cancelPaste)
+check("another key while transcribing is ignored", reaction(to: aKey, in: .transcribing), .ignore)
+check("a click while transcribing is ignored", reaction(to: nil, in: .transcribing), .ignore)
+check("Esc when idle is ignored", reaction(to: escapeKey, in: .idle), .ignore)
+
 if failures > 0 {
   print("\(failures) failed")
   exit(1)
