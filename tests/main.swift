@@ -43,6 +43,13 @@ for (id, name, want) in [("com.apple.keylayout.US", "U.S.", 9), ("com.apple.keyl
   check("Cmd + V on \(name) is key \(want)", layout(id).flatMap { keyCode(for: "v", layout: $0) }.map(Int.init), want)
 }
 
+let turbo = "ggml-large-v3-turbo-q5_0.bin", small = "ggml-small.en.bin"
+check("nothing picked: the best downloaded", chooseModel(picked: nil, downloaded: [turbo, small])?.file, turbo)
+check("the picked model is used", chooseModel(picked: small, downloaded: [turbo, small])?.file, small)
+check("a picked model that was deleted falls back", chooseModel(picked: turbo, downloaded: [small])?.file, small)
+check("an unknown pick falls back", chooseModel(picked: "ggml-tiny.bin", downloaded: [turbo, small])?.file, turbo)
+check("nothing downloaded: no model", chooseModel(picked: small, downloaded: [])?.file, nil)
+
 if failures > 0 {
   print("\(failures) failed")
   exit(1)

@@ -6,12 +6,19 @@ import AVFoundation
 import Speech
 
 let home = FileManager.default.homeDirectoryForCurrentUser.path
-// The larger turbo model is more accurate; the small one is the fallback install.sh fetches first.
-let modelPath = ProcessInfo.processInfo.environment["VOICE_TYPE_MODEL"]
-  ?? ["ggml-large-v3-turbo-q5_0.bin", "ggml-small.en.bin"]
-    .map { home + "/.local/share/voice-type/" + $0 }
-    .first { FileManager.default.fileExists(atPath: $0) }
-  ?? home + "/.local/share/voice-type/ggml-small.en.bin"
+let modelDir = home + "/.local/share/voice-type/"
+let modelKey = "model"
+
+func downloadedModels() -> Set<String> {
+  Set(models.map(\.file).filter { FileManager.default.fileExists(atPath: modelDir + $0) })
+}
+
+// VOICE_TYPE_MODEL, a path to any model file, wins over the menu.
+func modelPath() -> String? {
+  if let path = ProcessInfo.processInfo.environment["VOICE_TYPE_MODEL"] { return path }
+  let picked = UserDefaults.standard.string(forKey: modelKey)
+  return chooseModel(picked: picked, downloaded: downloadedModels()).map { modelDir + $0.file }
+}
 let whisperPath = ["/opt/homebrew/bin/whisper-cli", "/usr/local/bin/whisper-cli"]
   .first { FileManager.default.isExecutableFile(atPath: $0) }
 
@@ -52,17 +59,28 @@ final class App: NSObject, NSApplicationDelegate {
   var feedbackTimer: Timer?
   var limitTimer: Timer?
   var loggedWaiting = false
+  var modelItems: [NSMenuItem] = []
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     let menu = NSMenu()
     menu.addItem(withTitle: "Hold Ctrl + Option to talk", action: nil, keyEquivalent: "")
     menu.addItem(.separator())
+    let downloaded = downloadedModels()
+    for model in models where downloaded.contains(model.file) {
+      let item = NSMenuItem(title: model.name, action: #selector(pickModel(_:)), keyEquivalent: "")
+      item.target = self
+      item.representedObject = model.file
+      menu.addItem(item)
+      modelItems.append(item)
+    }
+    if !modelItems.isEmpty { menu.addItem(.separator()) }
+    markPickedModel()
     menu.addItem(withTitle: "Quit VoiceType", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
     statusItem.menu = menu
     removeLeftoverRecordings()
 
-    guard whisperPath != nil, FileManager.default.fileExists(atPath: modelPath) else {
+    guard whisperPath != nil, let path = modelPath(), FileManager.default.fileExists(atPath: path) else {
       log("whisper-cli or the model is missing; run install.sh")
       show("mic.slash", tint: .systemOrange)
       return
@@ -195,6 +213,19 @@ final class App: NSObject, NSApplicationDelegate {
     }
   }
 
+  @objc func pickModel(_ item: NSMenuItem) {
+    UserDefaults.standard.set(item.representedObject as? String, forKey: modelKey)
+    markPickedModel()
+  }
+
+  // Ticks the model in use, which may not be the one picked if that file has gone.
+  func markPickedModel() {
+    let inUse = modelPath()
+    for item in modelItems {
+      item.state = (item.representedObject as? String).map { modelDir + $0 } == inUse ? .on : .off
+    }
+  }
+
   func hideBubble() {
     bubble.hide()
     bubbleShown = false
@@ -226,9 +257,13 @@ let onEvent: CGEventTapCallBack = { _, type, event, _ in
 }
 
 func transcribe(_ url: URL) -> String {
+  guard let model = modelPath() else {
+    log("no model to transcribe with")
+    return ""
+  }
   let process = Process()
   process.executableURL = URL(fileURLWithPath: whisperPath!)
-  process.arguments = ["-m", modelPath, "-f", url.path, "-l", "en", "-nt", "-np"]
+  process.arguments = ["-m", model, "-f", url.path, "-l", "en", "-nt", "-np"]
   let output = Pipe()
   process.standardOutput = output
   process.standardError = FileHandle.nullDevice
