@@ -50,6 +50,13 @@ check("a picked model that was deleted falls back", chooseModel(picked: turbo, d
 check("an unknown pick falls back", chooseModel(picked: "ggml-tiny.bin", downloaded: [turbo, small])?.file, turbo)
 check("nothing downloaded: no model", chooseModel(picked: small, downloaded: [])?.file, nil)
 
+func data(_ s: String) -> Data { Data(s.utf8) }
+check("the log starts on the line after the cut", newestLines(data("ne three\nfour\nfive\n")), data("four\nfive\n"))
+check("a cut just before a line break loses only that break", newestLines(data("\nfour\n")), data("four\n"))
+check("a cut that lands on the last line break leaves nothing", newestLines(data("five\n")), data(""))
+check("no line break keeps everything", newestLines(data("one long line")), data("one long line"))
+check("multi-byte text after the cut stays whole", newestLines(data("é\nnaïve café\n")), data("naïve café\n"))
+
 if failures > 0 {
   print("\(failures) failed")
   exit(1)

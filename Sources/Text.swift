@@ -22,3 +22,10 @@ func startedOver(from old: String, to new: String) -> Bool {
 func joined(_ a: String, _ b: String) -> String {
   a.isEmpty ? b : b.isEmpty ? a : a + " " + b
 }
+
+// The end of a log, from just after its first line break, so it starts on a whole line.
+// With no line break at all it is kept as it is.
+func newestLines(_ tail: Data) -> Data {
+  guard let cut = tail.firstIndex(of: UInt8(ascii: "\n")) else { return tail }
+  return Data(tail[(cut + 1)...])
+}

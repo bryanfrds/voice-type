@@ -47,12 +47,14 @@ func log(_ message: String) {
   }
 }
 
-// Keeps the newest half of the log, starting at a whole line.
+// Cuts the log back to its newest part, reading only that part of the file.
 func trimLog() {
-  guard let data = try? Data(contentsOf: logURL), data.count > logLimit else { return }
-  let tail = data.suffix(logLimit / 2)
-  let start = tail.firstIndex(of: UInt8(ascii: "\n")).map { $0 + 1 } ?? tail.startIndex
-  try? Data(tail[start...]).write(to: logURL, options: .atomic)
+  guard let size = (try? FileManager.default.attributesOfItem(atPath: logURL.path))?[.size] as? Int,
+        size > logLimit, let file = try? FileHandle(forReadingFrom: logURL) else { return }
+  try? file.seek(toOffset: UInt64(size - logLimit / 2))
+  let tail = (try? file.readToEnd()) ?? Data()
+  try? file.close()
+  try? newestLines(tail).write(to: logURL, options: .atomic)
 }
 
 enum State { case idle, recording, transcribing }
