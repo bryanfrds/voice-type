@@ -26,14 +26,13 @@ cat > "$agent" <<PLIST
 <plist version="1.0">
 <dict>
   <key>Label</key><string>$label</string>
-  <key>ProgramArguments</key><array><string>$HOME/Applications/VoiceType.app/Contents/MacOS/VoiceType</string></array>
+  <key>ProgramArguments</key><array><string>/usr/bin/open</string><string>-a</string><string>$HOME/Applications/VoiceType.app</string></array>
   <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
-  <key>StandardErrorPath</key><string>$HOME/Library/Logs/voice-type.log</string>
 </dict>
 </plist>
 PLIST
 launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
+pkill -x VoiceType 2>/dev/null || true
 # Stopping finishes in the background; starting again too soon fails.
 for _ in 1 2 3 4 5 6 7 8 9 10; do
   launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1 || break

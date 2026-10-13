@@ -19,8 +19,17 @@ let maximumHold: TimeInterval = 120
 let transcribeTimeout: TimeInterval = 60
 let tempPrefix = NSTemporaryDirectory() + "voice-type-"
 
+let logURL = URL(fileURLWithPath: home + "/Library/Logs/voice-type.log")
+
 func log(_ message: String) {
-  FileHandle.standardError.write(Data("\(Date()) \(message)\n".utf8))
+  let line = Data("\(Date()) \(message)\n".utf8)
+  if let file = try? FileHandle(forWritingTo: logURL) {
+    file.seekToEndOfFile()
+    file.write(line)
+    try? file.close()
+  } else {
+    try? line.write(to: logURL)
+  }
 }
 
 enum State { case idle, recording, transcribing }
