@@ -6,7 +6,11 @@ import AVFoundation
 import Speech
 
 let home = FileManager.default.homeDirectoryForCurrentUser.path
+// The larger turbo model is more accurate; the small one is the fallback install.sh fetches first.
 let modelPath = ProcessInfo.processInfo.environment["VOICE_TYPE_MODEL"]
+  ?? ["ggml-large-v3-turbo-q5_0.bin", "ggml-small.en.bin"]
+    .map { home + "/.local/share/voice-type/" + $0 }
+    .first { FileManager.default.fileExists(atPath: $0) }
   ?? home + "/.local/share/voice-type/ggml-small.en.bin"
 let whisperPath = ["/opt/homebrew/bin/whisper-cli", "/usr/local/bin/whisper-cli"]
   .first { FileManager.default.isExecutableFile(atPath: $0) }
@@ -174,8 +178,12 @@ final class App: NSObject, NSApplicationDelegate {
     show("ellipsis", tint: nil)
     if bubbleShown { bubble.show(words.isEmpty ? "…" : words + " …", dim: true) }
     let url = recording.url
+    let held = Date().timeIntervalSince(startedAt)
     DispatchQueue.global(qos: .userInitiated).async {
+      let began = Date()
       let text = transcribe(url)
+      log(String(format: "held %.1fs; Whisper gave %d characters in %.1fs",
+                 held, text.count, Date().timeIntervalSince(began)))
       try? FileManager.default.removeItem(at: url)
       DispatchQueue.main.async {
         self.hideBubble()

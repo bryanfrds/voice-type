@@ -9,6 +9,7 @@ label=com.bryanfrds.voice-type
 agent="$HOME/Library/LaunchAgents/$label.plist"
 
 command -v whisper-cli >/dev/null || brew install whisper-cpp
+./make-cert.sh
 if [ ! -f "$model" ]; then
   mkdir -p "$model_dir"
   curl -fL -o "$model.part" https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin

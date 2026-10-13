@@ -32,7 +32,8 @@ whisper.cpp or the model is missing.
 
 ## Notes
 
-- Each rebuild is a new app as far as macOS is concerned. After running `install.sh`
-  again, you may need to switch VoiceType off and on in Accessibility.
-- Set `VOICE_TYPE_MODEL` to use a different whisper.cpp model file.
+- `install.sh` creates a private "VoiceType Local Signing" certificate in your login keychain
+  (`make-cert.sh`) and signs every build with it, so macOS keeps the permissions across rebuilds.
+- The final text uses `ggml-large-v3-turbo-q5_0.bin` from `~/.local/share/voice-type` if it
+  is there, otherwise `ggml-small.en.bin`. Set `VOICE_TYPE_MODEL` to use another model file.
 - Log: `~/Library/Logs/voice-type.log`. To remove VoiceType, run `./uninstall.sh`.

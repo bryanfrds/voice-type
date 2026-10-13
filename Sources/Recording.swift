@@ -7,11 +7,21 @@ final class Recording {
   let url: URL
   private let engine = AVAudioEngine()
   private var file: AVAudioFile?
-  private let request = SFSpeechAudioBufferRecognitionRequest()
+  private let onWords: (String) -> Void
+  private let recognizer: SFSpeechRecognizer?
+  // The recognizer gives up after a pause, so a new pass starts each time one ends.
+  // The audio thread appends to whichever pass is current, hence the lock.
+  private let lock = NSLock()
+  private var request: SFSpeechAudioBufferRecognitionRequest?
   private var task: SFSpeechRecognitionTask?
+  private var earlier = ""  // words from passes that have ended
+  private var latest = ""   // words from the current pass
+  private var passes = 0
+  private var active = true
 
   init?(url: URL, onWords: @escaping (String) -> Void) {
     self.url = url
+    self.onWords = onWords
     let input = engine.inputNode
     let format = input.outputFormat(forBus: 0)
     guard format.sampleRate > 0 else {
@@ -30,19 +40,16 @@ final class Recording {
 
     if SFSpeechRecognizer.authorizationStatus() == .authorized,
        let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US")), recognizer.isAvailable {
-      request.shouldReportPartialResults = true
-      request.addsPunctuation = true
-      if recognizer.supportsOnDeviceRecognition { request.requiresOnDeviceRecognition = true }
-      task = recognizer.recognitionTask(with: request) { result, _ in
-        guard let words = result?.bestTranscription.formattedString else { return }
-        DispatchQueue.main.async { onWords(words) }
-      }
+      self.recognizer = recognizer
+    } else {
+      recognizer = nil
     }
+    startPass()
 
-    let request = self.request
-    input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+    input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
       try? file.write(from: buffer)
-      request.append(buffer)
+      guard let self else { return }
+      self.lock.withLock { self.request }?.append(buffer)
     }
     do { try engine.start() } catch {
       log("could not start the microphone: \(error)")
@@ -52,11 +59,43 @@ final class Recording {
     }
   }
 
+  private func startPass() {
+    // A recognizer that fails straight away every time would otherwise restart forever.
+    guard let recognizer, active, passes < 50 else { return }
+    passes += 1
+    let request = SFSpeechAudioBufferRecognitionRequest()
+    request.shouldReportPartialResults = true
+    request.addsPunctuation = true
+    if recognizer.supportsOnDeviceRecognition { request.requiresOnDeviceRecognition = true }
+    lock.withLock { self.request = request }
+    task = recognizer.recognitionTask(with: request) { [weak self] result, error in
+      DispatchQueue.main.async { self?.handle(result, error) }
+    }
+  }
+
+  private func handle(_ result: SFSpeechRecognitionResult?, _ error: Error?) {
+    guard active else { return }
+    if let result {
+      latest = result.bestTranscription.formattedString
+      onWords(joined(earlier, latest))
+    }
+    if result?.isFinal == true || error != nil {
+      earlier = joined(earlier, latest)
+      latest = ""
+      startPass()
+    }
+  }
+
+  private func joined(_ a: String, _ b: String) -> String {
+    a.isEmpty ? b : b.isEmpty ? a : a + " " + b
+  }
+
   // Stops the mic and closes the file so Whisper can read all of it.
   func finish() {
+    active = false
     engine.stop()
     engine.inputNode.removeTap(onBus: 0)
-    request.endAudio()
+    lock.withLock { request }?.endAudio()
     task?.cancel()
     file?.close()
     file = nil
