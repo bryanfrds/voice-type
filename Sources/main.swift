@@ -13,6 +13,11 @@ let whisperPath = ["/opt/homebrew/bin/whisper-cli", "/usr/local/bin/whisper-cli"
 let minimumHold: TimeInterval = 0.35
 // The icon and start sound wait this long, so Ctrl + Option shortcuts don't flash them.
 let feedbackDelay: TimeInterval = 0.15
+// A recording stops by itself after this long, in case the key release was missed.
+let maximumHold: TimeInterval = 120
+// whisper-cli is stopped if it takes longer than this.
+let transcribeTimeout: TimeInterval = 60
+let tempPrefix = NSTemporaryDirectory() + "voice-type-"
 
 func log(_ message: String) {
   FileHandle.standardError.write(Data("\(Date()) \(message)\n".utf8))
@@ -27,6 +32,8 @@ final class App: NSObject, NSApplicationDelegate {
   var state = State.idle
   var startedAt = Date()
   var feedbackTimer: Timer?
+  var limitTimer: Timer?
+  var loggedWaiting = false
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -35,6 +42,7 @@ final class App: NSObject, NSApplicationDelegate {
     menu.addItem(.separator())
     menu.addItem(withTitle: "Quit VoiceType", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
     statusItem.menu = menu
+    removeLeftoverRecordings()
 
     guard whisperPath != nil, FileManager.default.fileExists(atPath: modelPath) else {
       log("whisper-cli or the model is missing; run install.sh")
@@ -45,15 +53,26 @@ final class App: NSObject, NSApplicationDelegate {
     AVCaptureDevice.requestAccess(for: .audio) { granted in
       if !granted { log("microphone access was refused") }
     }
-    // Asks for Accessibility, which both watching the keys and pasting need.
+    // Watching the keys needs Input Monitoring; pasting needs Accessibility. Ask for both.
     let prompt = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
     _ = AXIsProcessTrustedWithOptions(prompt)
+    if !CGPreflightListenEventAccess() { _ = CGRequestListenEventAccess() }
     startWatchingKeys()
   }
 
-  // Keeps trying until Accessibility is allowed, so no restart is needed after granting it.
+  // Keeps trying until Input Monitoring is allowed, so no restart is needed after granting it.
   func startWatchingKeys() {
-    let mask = (1 << CGEventType.flagsChanged.rawValue) | (1 << CGEventType.keyDown.rawValue)
+    guard CGPreflightListenEventAccess() else {
+      if tap == nil && !loggedWaiting {
+        log("waiting for Input Monitoring (Accessibility: \(AXIsProcessTrusted()))")
+        loggedWaiting = true
+      }
+      show("mic.slash", tint: .systemOrange)
+      DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.startWatchingKeys() }
+      return
+    }
+    let mask = [CGEventType.flagsChanged, .keyDown, .leftMouseDown, .rightMouseDown]
+      .reduce(0) { $0 | (1 << $1.rawValue) }
     guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap,
                                       options: .listenOnly, eventsOfInterest: CGEventMask(mask),
                                       callback: onEvent, userInfo: nil) else {
@@ -65,29 +84,41 @@ final class App: NSObject, NSApplicationDelegate {
     CFRunLoopAddSource(CFRunLoopGetMain(), CFMachPortCreateRunLoopSource(nil, tap, 0), .commonModes)
     CGEvent.tapEnable(tap: tap, enable: true)
     show("mic", tint: nil)
-    log("watching for Ctrl + Option")
+    log("watching for Ctrl + Option (Accessibility: \(AXIsProcessTrusted()))")
   }
 
   func modifiersChanged(_ flags: CGEventFlags) {
     let held = flags.contains([.maskControl, .maskAlternate])
-      && flags.intersection([.maskCommand, .maskShift]).isEmpty
-    if held && state == .idle { startRecording() }
-    else if !held && state == .recording { stopRecording() }
+    let extra = !flags.intersection([.maskCommand, .maskShift]).isEmpty
+    switch state {
+    case .idle where held && !extra:
+      log("Ctrl + Option held")
+      startRecording()
+    case .recording where extra: cancelRecording()  // Cmd or Shift added: a shortcut
+    case .recording where !held: stopRecording()
+    default: break
+    }
   }
 
-  // A key pressed while Ctrl + Option is held means a shortcut, not talking.
-  func keyPressed() {
+  // Picks up keys held or let go while the key watcher wasn't listening.
+  func recheckModifiers() {
+    modifiersChanged(CGEventSource.flagsState(.combinedSessionState))
+  }
+
+  // A key or click while Ctrl + Option is held means a shortcut, not talking.
+  func otherInput() {
     if state == .recording { cancelRecording() }
   }
 
   func startRecording() {
-    let url = URL(fileURLWithPath: NSTemporaryDirectory() + "voice-type-\(UUID().uuidString).wav")
+    let url = URL(fileURLWithPath: tempPrefix + "\(UUID().uuidString).wav")
     let settings: [String: Any] = [
       AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 16000, AVNumberOfChannelsKey: 1,
       AVLinearPCMBitDepthKey: 16, AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false,
     ]
     guard let recorder = try? AVAudioRecorder(url: url, settings: settings), recorder.record() else {
       log("could not start recording")
+      try? FileManager.default.removeItem(at: url)
       return
     }
     self.recorder = recorder
@@ -97,10 +128,15 @@ final class App: NSObject, NSApplicationDelegate {
       self.show("mic.fill", tint: .systemRed)
       NSSound(named: "Tink")?.play()
     }
+    limitTimer = Timer.scheduledTimer(withTimeInterval: maximumHold, repeats: false) { _ in
+      log("stopped a recording that ran past \(Int(maximumHold))s")
+      self.stopRecording()
+    }
   }
 
   func cancelRecording() {
     feedbackTimer?.invalidate()
+    limitTimer?.invalidate()
     if let recorder {
       recorder.stop()
       recorder.deleteRecording()
@@ -116,6 +152,7 @@ final class App: NSObject, NSApplicationDelegate {
       return
     }
     feedbackTimer?.invalidate()
+    limitTimer?.invalidate()
     recorder.stop()
     self.recorder = nil
     state = .transcribing
@@ -128,6 +165,7 @@ final class App: NSObject, NSApplicationDelegate {
         if !text.isEmpty { paste(text + " ") }
         self.state = .idle
         self.show("mic", tint: nil)
+        self.recheckModifiers()  // Ctrl + Option may already be held for the next sentence
       }
     }
   }
@@ -136,14 +174,22 @@ final class App: NSObject, NSApplicationDelegate {
     statusItem.button?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "VoiceType")
     statusItem.button?.contentTintColor = tint
   }
+
+  // Recordings left by a quit or crash mid-recording.
+  func removeLeftoverRecordings() {
+    let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+    let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+    for file in files where file.path.hasPrefix(tempPrefix) { try? FileManager.default.removeItem(at: file) }
+  }
 }
 
 let onEvent: CGEventTapCallBack = { _, type, event, _ in
   switch type {
   case .tapDisabledByTimeout, .tapDisabledByUserInput:
     if let tap = app.tap { CGEvent.tapEnable(tap: tap, enable: true) }
+    app.recheckModifiers()
   case .flagsChanged: app.modifiersChanged(event.flags)
-  case .keyDown: app.keyPressed()
+  case .keyDown, .leftMouseDown, .rightMouseDown: app.otherInput()
   default: break
   }
   return Unmanaged.passUnretained(event)
@@ -160,6 +206,12 @@ func transcribe(_ url: URL) -> String {
     log("whisper-cli failed to start: \(error)")
     return ""
   }
+  DispatchQueue.global().asyncAfter(deadline: .now() + transcribeTimeout) {
+    if process.isRunning {
+      log("whisper-cli took over \(Int(transcribeTimeout))s; stopped it")
+      process.terminate()
+    }
+  }
   let data = output.fileHandleForReading.readDataToEndOfFile()
   process.waitUntilExit()
   return clean(String(decoding: data, as: UTF8.self))
@@ -174,25 +226,45 @@ func clean(_ raw: String) -> String {
     .joined(separator: " ")
 }
 
+// The user's own clipboard, kept while a transcript sits on it, and the clipboard
+// change count of the latest transcript.
+var savedClipboard: [NSPasteboardItem]?
+var latestPaste = 0
+
 // Pastes through the clipboard with Cmd + V, then puts back what was on the clipboard before.
 func paste(_ text: String) {
   let board = NSPasteboard.general
-  let saved = (board.pasteboardItems ?? []).map { item -> NSPasteboardItem in
-    let copy = NSPasteboardItem()
-    for type in item.types { if let data = item.data(forType: type) { copy.setData(data, forType: type) } }
-    return copy
+  // A second paste before the first is put back must not save the first transcript.
+  if savedClipboard == nil {
+    savedClipboard = (board.pasteboardItems ?? []).map { item in
+      let copy = NSPasteboardItem()
+      for type in item.types { if let data = item.data(forType: type) { copy.setData(data, forType: type) } }
+      return copy
+    }
   }
+  let item = NSPasteboardItem()
+  item.setString(text, forType: .string)
+  // Tells clipboard managers not to keep it.
+  item.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
   board.clearContents()
-  board.setString(text, forType: .string)
+  board.writeObjects([item])
+  let ours = board.changeCount
+  latestPaste = ours
   let source = CGEventSource(stateID: .combinedSessionState)
   for down in [true, false] {
     let event = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: down)  // 9 is V
     event?.flags = .maskCommand
     event?.post(tap: .cghidEventTap)
   }
-  DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-    board.clearContents()
-    if !saved.isEmpty { board.writeObjects(saved) }
+  // Slow apps read the clipboard late, so wait before putting the old one back.
+  DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+    guard ours == latestPaste else { return }  // a later paste puts it back instead
+    if board.changeCount == ours, let saved = savedClipboard {
+      board.clearContents()
+      if !saved.isEmpty { board.writeObjects(saved) }
+    }
+    // If the count moved, the user copied something new; keep that.
+    savedClipboard = nil
   }
 }
 

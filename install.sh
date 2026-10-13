@@ -34,5 +34,10 @@ cat > "$agent" <<PLIST
 </plist>
 PLIST
 launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
+# Stopping finishes in the background; starting again too soon fails.
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1 || break
+  sleep 0.5
+done
 launchctl bootstrap "gui/$(id -u)" "$agent"
 echo "VoiceType is running: look for the mic in the menu bar."
