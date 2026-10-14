@@ -8,6 +8,7 @@ final class Bubble {
   private let maxCharacters = 180
   private let panel: NSPanel
   private let label = NSTextField(wrappingLabelWithString: "")
+  private var hideTimer: Timer?
 
   init() {
     panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: width, height: 50),
@@ -32,7 +33,15 @@ final class Bubble {
   }
 
   // Dim text means "not words yet": listening, or turning the speech into the final text.
-  func show(_ text: String, dim: Bool = false) {
+  // With `hidingAfter`, the bubble hides itself after that long, unless something else is
+  // shown or it is hidden first.
+  func show(_ text: String, dim: Bool = false, hidingAfter delay: TimeInterval? = nil) {
+    hideTimer?.invalidate()
+    if let delay {
+      let timer = Timer(timeInterval: delay, repeats: false) { [weak self] _ in self?.hide() }
+      RunLoop.main.add(timer, forMode: .common)  // keeps counting while the menu is open
+      hideTimer = timer
+    }
     label.stringValue = text.count > maxCharacters ? "…" + text.suffix(maxCharacters) : text
     label.textColor = dim ? .secondaryLabelColor : .labelColor
     let inner = width - padding * 2
@@ -47,7 +56,10 @@ final class Bubble {
     panel.orderFrontRegardless()
   }
 
+  var isShowing: Bool { panel.isVisible }
+
   func hide() {
+    hideTimer?.invalidate()
     panel.orderOut(nil)
   }
 }
