@@ -57,6 +57,11 @@ check("a cut that lands on the last line break leaves nothing", newestLines(data
 check("no line break keeps everything", newestLines(data("one long line")), data("one long line"))
 check("multi-byte text after the cut stays whole", newestLines(data("é\nnaïve café\n")), data("naïve café\n"))
 
+check("no words: say so", finish("", pasteCancelled: false), .sayNothingHeard)
+check("no words after Esc: stay quiet", finish("", pasteCancelled: true), .nothing)
+check("words: paste them", finish("Hi.", pasteCancelled: false), .paste)
+check("words after Esc: keep, don't paste", finish("Hi.", pasteCancelled: true), .keepOnly)
+
 check("a short dictation is shown whole", preview("Hello there."), "Hello there.")
 check("a long one is cut at a word, keeping a word that ends at the cut", preview("Can you check whether the pull request merged and then play it", limit: 30),
       "Can you check whether the pull…")

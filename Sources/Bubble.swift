@@ -38,7 +38,9 @@ final class Bubble {
   func show(_ text: String, dim: Bool = false, hidingAfter delay: TimeInterval? = nil) {
     hideTimer?.invalidate()
     if let delay {
-      hideTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in self?.hide() }
+      let timer = Timer(timeInterval: delay, repeats: false) { [weak self] _ in self?.hide() }
+      RunLoop.main.add(timer, forMode: .common)  // keeps counting while the menu is open
+      hideTimer = timer
     }
     label.stringValue = text.count > maxCharacters ? "…" + text.suffix(maxCharacters) : text
     label.textColor = dim ? .secondaryLabelColor : .labelColor

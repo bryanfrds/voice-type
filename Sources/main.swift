@@ -232,11 +232,15 @@ final class App: NSObject, NSApplicationDelegate {
                  held, text.count, Date().timeIntervalSince(began)))
       try? FileManager.default.removeItem(at: url)
       DispatchQueue.main.async {
-        if text.isEmpty {
-          self.say("Didn't catch that")
-        } else {
+        switch finish(text, pasteCancelled: self.pasteCancelled) {
+        case .sayNothingHeard: self.say("Didn't catch that")
+        case .nothing: break
+        case .paste:
           self.hideBubble()
-          if !self.pasteCancelled { paste(text + " ") }
+          paste(text + " ")
+          self.remember(text)
+        case .keepOnly:
+          self.hideBubble()
           self.remember(text)  // kept even after Esc, in case it was a mistake
         }
         self.state = .idle

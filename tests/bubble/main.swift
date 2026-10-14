@@ -26,7 +26,7 @@ bubble.show("Didn't catch that", dim: true, hidingAfter: 0.2)
 bubble.hide()
 bubble.show("Next words")
 wait(0.3)
-check("hiding first also cancels it", bubble.isShowing)
+check("a note hidden early doesn't hide what comes next", bubble.isShowing)
 bubble.hide()
 
 if failures > 0 {
