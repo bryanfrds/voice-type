@@ -1,6 +1,8 @@
-// Checks for Sources/Text.swift and Sources/Keyboard.swift. Run with tests/run.sh.
+// Checks for the Sources/*.swift files that don't need the running app. Run with tests/run.sh.
+import AVFoundation
 import Carbon
 import Foundation
+import Speech
 var failures = 0
 
 func check<T: Equatable>(_ name: String, _ got: T, _ want: T) {
@@ -79,6 +81,14 @@ check("Esc while transcribing cancels the paste", reaction(to: escapeKey, in: .t
 check("another key while transcribing is ignored", reaction(to: aKey, in: .transcribing), .ignore)
 check("a click while transcribing is ignored", reaction(to: nil, in: .transcribing), .ignore)
 check("Esc when idle is ignored", reaction(to: escapeKey, in: .idle), .ignore)
+
+check("all allowed: no warning", permissionWarning(mic: .authorized, speech: .authorized), nil)
+check("not asked yet: no warning", permissionWarning(mic: .notDetermined, speech: .notDetermined), nil)
+check("mic off blocks recording", permissionWarning(mic: .denied, speech: .authorized)?.blocksRecording, true)
+check("mic off points at the Microphone page", permissionWarning(mic: .denied, speech: .denied)?.pane, "Privacy_Microphone")
+check("speech off still records", permissionWarning(mic: .authorized, speech: .denied)?.blocksRecording, false)
+check("speech off points at its page", permissionWarning(mic: .authorized, speech: .restricted)?.pane,
+      "Privacy_SpeechRecognition")
 
 if failures > 0 {
   print("\(failures) failed")
