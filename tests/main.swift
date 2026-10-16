@@ -90,6 +90,24 @@ check("speech off still records", permissionWarning(mic: .authorized, speech: .d
 check("speech off points at its page", permissionWarning(mic: .authorized, speech: .restricted)?.pane,
       "Privacy_SpeechRecognition")
 
+// Two screens like Bryan's: a 1920x1080 main monitor, and the laptop to its lower left.
+let monitor = CGRect(x: 0, y: 0, width: 1920, height: 1080)
+let laptop = CGRect(x: -1710, y: -596, width: 1710, height: 1107)
+let laptopWindow = CGRect(x: -1500, y: -400, width: 800, height: 600)
+check("the bubble goes where you're typing, not where the mouse is",
+      screenIndex(window: laptopWindow, mouse: CGPoint(x: 800, y: 900), screens: [monitor, laptop]), 1)
+check("with no focused window it follows the mouse",
+      screenIndex(window: nil, mouse: CGPoint(x: -100, y: 0), screens: [monitor, laptop]), 1)
+check("a window off every screen falls back to the mouse",
+      screenIndex(window: CGRect(x: 5000, y: 5000, width: 10, height: 10), mouse: CGPoint(x: 10, y: 10),
+                  screens: [monitor, laptop]), 0)
+check("nothing anywhere falls back to the first screen",
+      screenIndex(window: nil, mouse: CGPoint(x: 9999, y: 9999), screens: [monitor, laptop]), 0)
+check("no screens: nowhere", screenIndex(window: nil, mouse: .zero, screens: []), nil)
+check("Accessibility's top-left frame flips to AppKit's bottom-left",
+      appKitRect(fromAccessibility: CGRect(x: 100, y: 50, width: 400, height: 300), mainHeight: 1080),
+      CGRect(x: 100, y: 730, width: 400, height: 300))
+
 if failures > 0 {
   print("\(failures) failed")
   exit(1)
