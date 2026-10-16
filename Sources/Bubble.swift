@@ -48,8 +48,10 @@ final class Bubble {
     let height = ceil(label.sizeThatFits(NSSize(width: inner, height: .greatestFiniteMagnitude)).height)
     label.frame = NSRect(x: padding, y: padding, width: inner, height: height)
 
-    let mouse = NSEvent.mouseLocation
-    let screen = NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main
+    // On the screen you're typing on, not wherever the mouse was left.
+    let screens = NSScreen.screens
+    let screen = screenIndex(window: focusedWindowFrame(), mouse: NSEvent.mouseLocation,
+                             screens: screens.map(\.frame)).map { screens[$0] } ?? NSScreen.main
     let area = screen?.visibleFrame ?? .zero
     panel.setFrame(NSRect(x: area.midX - width / 2, y: area.minY + 60,
                           width: width, height: height + padding * 2), display: true)
