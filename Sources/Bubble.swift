@@ -9,6 +9,7 @@ final class Bubble {
   private let panel: NSPanel
   private let label = NSTextField(wrappingLabelWithString: "")
   private var hideTimer: Timer?
+  private var area: NSRect?   // the visible part of the screen the bubble is on
 
   init() {
     panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: width, height: 50),
@@ -48,9 +49,16 @@ final class Bubble {
     let height = ceil(label.sizeThatFits(NSSize(width: inner, height: .greatestFiniteMagnitude)).height)
     label.frame = NSRect(x: padding, y: padding, width: inner, height: height)
 
-    let mouse = NSEvent.mouseLocation
-    let screen = NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main
-    let area = screen?.visibleFrame ?? .zero
+    // On the screen you're typing on, not wherever the mouse was left. Chosen when the
+    // bubble appears and kept while it shows, so live words don't ask Accessibility
+    // several times a second or make the bubble jump screens mid-sentence.
+    if !panel.isVisible || area == nil {
+      let screens = NSScreen.screens
+      let screen = screenIndex(window: focusedWindowFrame(), mouse: NSEvent.mouseLocation,
+                               screens: screens.map(\.frame)).map { screens[$0] } ?? NSScreen.main
+      area = screen?.visibleFrame
+    }
+    let area = self.area ?? .zero
     panel.setFrame(NSRect(x: area.midX - width / 2, y: area.minY + 60,
                           width: width, height: height + padding * 2), display: true)
     panel.orderFrontRegardless()
@@ -61,5 +69,6 @@ final class Bubble {
   func hide() {
     hideTimer?.invalidate()
     panel.orderOut(nil)
+    area = nil
   }
 }
