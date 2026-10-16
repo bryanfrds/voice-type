@@ -23,15 +23,23 @@ func screenIndex(window: CGRect?, mouse: CGPoint, screens: [CGRect]) -> Int? {
 func focusedWindowFrame() -> CGRect? {
   guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
   let element = AXUIElementCreateApplication(app.processIdentifier)
+  AXUIElementSetMessagingTimeout(element, 0.25)
   var window: CFTypeRef?
   guard AXUIElementCopyAttributeValue(element, kAXFocusedWindowAttribute as CFString, &window) == .success,
         let window, CFGetTypeID(window) == AXUIElementGetTypeID() else { return nil }
+  let axWindow = window as! AXUIElement
+  AXUIElementSetMessagingTimeout(axWindow, 0.25)   // a hung app mustn't freeze VoiceType
   var position = CGPoint.zero, size = CGSize.zero
-  var value: CFTypeRef?
-  if AXUIElementCopyAttributeValue(window as! AXUIElement, kAXPositionAttribute as CFString, &value) == .success,
-     let value { AXValueGetValue(value as! AXValue, .cgPoint, &position) } else { return nil }
-  if AXUIElementCopyAttributeValue(window as! AXUIElement, kAXSizeAttribute as CFString, &value) == .success,
-     let value { AXValueGetValue(value as! AXValue, .cgSize, &size) } else { return nil }
+  guard let p = axValue(axWindow, kAXPositionAttribute), AXValueGetValue(p, .cgPoint, &position),
+        let s = axValue(axWindow, kAXSizeAttribute), AXValueGetValue(s, .cgSize, &size) else { return nil }
   guard let mainHeight = NSScreen.screens.first?.frame.height else { return nil }
   return appKitRect(fromAccessibility: CGRect(origin: position, size: size), mainHeight: mainHeight)
+}
+
+// An attribute of an Accessibility element that is an AXValue (a point, size...), or nil.
+private func axValue(_ element: AXUIElement, _ attribute: String) -> AXValue? {
+  var value: CFTypeRef?
+  guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success,
+        let value, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+  return (value as! AXValue)
 }

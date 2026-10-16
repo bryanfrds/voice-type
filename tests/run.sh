@@ -10,7 +10,7 @@ sources=$(ls Sources/*.swift | grep -vE '/(main|Recording)\.swift$')
 # shellcheck disable=SC2086
 swiftc -swift-version 5 -o "$out/tests" $sources tests/main.swift
 "$out/tests"
-swiftc -swift-version 5 -o "$out/bubble" Sources/Bubble.swift tests/bubble/main.swift
+swiftc -swift-version 5 -o "$out/bubble" Sources/Bubble.swift Sources/Placement.swift tests/bubble/main.swift
 "$out/bubble"
 tests/remove-cert.sh
 tests/uninstall.sh
