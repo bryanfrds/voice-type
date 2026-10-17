@@ -68,6 +68,9 @@ final class MeetingRecording: NSObject, SCStreamOutput, SCStreamDelegate {
       log("meeting: could not start the microphone: \(error)")
       input.removeTap(onBus: 0)
       closeMicFile()
+      // Nothing was recorded, so the empty file mustn't count as a part (or a failure).
+      lock.withLock { _ = parts.popLast() }
+      try? FileManager.default.removeItem(at: part.url)
       return false
     }
     return true
