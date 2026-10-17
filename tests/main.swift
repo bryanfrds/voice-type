@@ -131,10 +131,13 @@ var utc = Calendar(identifier: .gregorian)
 utc.timeZone = TimeZone(identifier: "UTC")!
 let meetingDate = utc.date(from: DateComponents(year: 2026, month: 10, day: 17, hour: 14, minute: 30))!
 NSTimeZone.default = TimeZone(identifier: "UTC")!
-check("the note is named by date and time", noteName(for: meetingDate), "2026-10-17 14.30.md")
+check("the note is named by date and time", noteStem(for: meetingDate), "2026-10-17 14.30")
 check("a key in the environment wins", deepSeekKey(environment: ["DEEPSEEK_API_KEY": "env"], config: "DEEPSEEK_API_KEY=file"), "env")
 check("a key from the config file, quotes trimmed", deepSeekKey(environment: [:], config: "# notes\nDEEPSEEK_API_KEY = \"sk-1\"\n"), "sk-1")
 check("no key anywhere", deepSeekKey(environment: [:], config: nil), nil)
+check("Windows line endings don't stick to the key", deepSeekKey(environment: [:], config: "DEEPSEEK_API_KEY=sk-2\r\nOTHER=x\r\n"), "sk-2")
+check("an export line works too", deepSeekKey(environment: [:], config: "export DEEPSEEK_API_KEY=sk-3"), "sk-3")
+check("the summary instructions explain a room recording", summaryInstructions.contains("\"Room\""), true)
 let request = summaryRequest(transcript: "[0:00] You: Hi", key: "sk-1")
 check("the request goes to DeepSeek with the key", request.value(forHTTPHeaderField: "Authorization"), "Bearer sk-1")
 let sent = (try? JSONSerialization.jsonObject(with: request.httpBody ?? Data())) as? [String: Any]
@@ -145,6 +148,11 @@ let missing = note(date: meetingDate, length: 61_000, summary: nil, missing: "th
 check("a note without a summary says why", missing.contains("_No summary: the DeepSeek balance is empty_"), true)
 check("a note with nothing heard says so", missing.contains("_Nothing was heard._"), true)
 check("a note gives the length", missing.contains("Length: 1:01"), true)
+let full = note(date: meetingDate, length: 61_000, summary: "## Summary\n- Budget agreed", missing: nil,
+                transcript: "[0:00] You: Hi")
+check("a note with a summary puts it before the transcript",
+      (full.range(of: "## Summary")?.lowerBound).map { $0 < full.range(of: "## Transcript")!.lowerBound }, true)
+check("a note with a summary has no missing line", full.contains("_No summary"), false)
 
 if failures > 0 {
   print("\(failures) failed")
