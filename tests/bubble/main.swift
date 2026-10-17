@@ -29,6 +29,28 @@ wait(0.3)
 check("a note hidden early doesn't hide what comes next", bubble.isShowing)
 bubble.hide()
 
+// A fresh panel each time the bubble appears, so a panel stranded on one Space by sleep is
+// never reused; the same panel while it stays up, so it isn't rebuilt mid-sentence.
+bubble.show("One")
+let first = bubble.panelForTesting
+bubble.show("One two")
+check("live words keep the same panel", bubble.panelForTesting === first)
+bubble.hide()
+bubble.show("Again")
+check("appearing again gets a new panel", bubble.panelForTesting !== first)
+check("the new panel still joins every Space",
+      bubble.panelForTesting.collectionBehavior.contains(.canJoinAllSpaces))
+bubble.hide()
+
+// The app empties its autorelease pool after every event; each step here does the same.
+weak var old: NSPanel?
+let fresh = Bubble()
+autoreleasepool { fresh.show("Before"); old = fresh.panelForTesting; fresh.hide() }
+wait(0.05)
+autoreleasepool { fresh.show("After"); fresh.hide() }
+wait(0.2)
+check("an old panel is freed, not leaked", old == nil)
+
 if failures > 0 {
   print("\(failures) failed")
   exit(1)
