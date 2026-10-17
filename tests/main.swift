@@ -108,6 +108,44 @@ check("Accessibility's top-left frame flips to AppKit's bottom-left",
       appKitRect(fromAccessibility: CGRect(x: 100, y: 50, width: 400, height: 300), mainHeight: 1080),
       CGRect(x: 100, y: 730, width: 400, height: 300))
 
+// Meeting notes.
+let whisperJSON = Data("""
+  {"transcription": [
+    {"offsets": {"from": 0, "to": 2000}, "text": " Shall we start?"},
+    {"offsets": {"from": 2000, "to": 3000}, "text": " [BLANK_AUDIO]"},
+    {"offsets": {"from": 9000, "to": 12000}, "text": " Budget is RM5,000."}
+  ]}
+  """.utf8)
+let you = segments(fromWhisperJSON: whisperJSON, speaker: "You")
+check("Whisper segments are read, noise dropped", you.map(\.text), ["Shall we start?", "Budget is RM5,000."])
+check("a segment keeps its start time", you.first?.start, 0)
+check("bad JSON gives no segments", segments(fromWhisperJSON: Data("nope".utf8), speaker: "You"), [])
+let others = [Segment(start: 3000, speaker: "Others", text: "Yes."), Segment(start: 5000, speaker: "Others", text: "Go ahead.")]
+check("both sides merge in time order, a speaker's run joined",
+      transcript([you, others]),
+      "[0:00] You: Shall we start?\n[0:03] Others: Yes. Go ahead.\n[0:09] You: Budget is RM5,000.")
+check("nothing heard: empty transcript", transcript([[], []]), "")
+check("minutes and seconds", clock(754_000), "12:34")
+check("hours when past an hour", clock(3_723_000), "1:02:03")
+var utc = Calendar(identifier: .gregorian)
+utc.timeZone = TimeZone(identifier: "UTC")!
+let meetingDate = utc.date(from: DateComponents(year: 2026, month: 10, day: 17, hour: 14, minute: 30))!
+NSTimeZone.default = TimeZone(identifier: "UTC")!
+check("the note is named by date and time", noteName(for: meetingDate), "2026-10-17 14.30.md")
+check("a key in the environment wins", deepSeekKey(environment: ["DEEPSEEK_API_KEY": "env"], config: "DEEPSEEK_API_KEY=file"), "env")
+check("a key from the config file, quotes trimmed", deepSeekKey(environment: [:], config: "# notes\nDEEPSEEK_API_KEY = \"sk-1\"\n"), "sk-1")
+check("no key anywhere", deepSeekKey(environment: [:], config: nil), nil)
+let request = summaryRequest(transcript: "[0:00] You: Hi", key: "sk-1")
+check("the request goes to DeepSeek with the key", request.value(forHTTPHeaderField: "Authorization"), "Bearer sk-1")
+let sent = (try? JSONSerialization.jsonObject(with: request.httpBody ?? Data())) as? [String: Any]
+check("the transcript is the user message", ((sent?["messages"] as? [[String: Any]])?.last?["content"] as? String), "[0:00] You: Hi")
+check("the reply text is read", summary(fromReply: Data(#"{"choices":[{"message":{"content":"  ## Summary\n- Hi  "}}]}"#.utf8)), "## Summary\n- Hi")
+check("an error reply has no summary", summary(fromReply: Data(#"{"error":{"message":"Insufficient Balance"}}"#.utf8)), nil)
+let missing = note(date: meetingDate, length: 61_000, summary: nil, missing: "the DeepSeek balance is empty", transcript: "")
+check("a note without a summary says why", missing.contains("_No summary: the DeepSeek balance is empty_"), true)
+check("a note with nothing heard says so", missing.contains("_Nothing was heard._"), true)
+check("a note gives the length", missing.contains("Length: 1:01"), true)
+
 if failures > 0 {
   print("\(failures) failed")
   exit(1)
