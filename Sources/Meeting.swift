@@ -2,38 +2,75 @@ import AVFoundation
 import AppKit
 import ScreenCaptureKit
 
-// A meeting being recorded: the mic to one file ("You") and, when Screen Recording is
-// allowed, the Mac's own sound to another ("Others": a call's other side). Kept apart so
-// the transcript can say who spoke. In a room with no call, only the mic has anything.
+// A meeting being recorded: the mic to mic-N.wav files and, when Screen Recording is
+// allowed, the Mac's own sound to call.wav (a call's other side). Kept apart so the
+// transcript can say who spoke. In a room with no call, only the mic has anything.
 final class MeetingRecording: NSObject, SCStreamOutput, SCStreamDelegate {
   let started = Date()
-  let micURL: URL
+  let folder: URL
   let callURL: URL
   private let engine = AVAudioEngine()
+  private let lock = NSLock()            // the mic file and parts: main and audio threads
+  private var micFile: AVAudioFile?
+  private(set) var micParts: [MicPart] = []
   private var stream: SCStream?
   private var callFile: AVAudioFile?
+  private var stopped = false            // read and written on callQueue only
   private let callQueue = DispatchQueue(label: "voice-type.meeting-call-audio")
+  private var starting: Task<Void, Never>?
+  private var configObserver: NSObjectProtocol?
 
   init?(folder: URL) {
-    micURL = folder.appendingPathComponent("mic.wav")
+    self.folder = folder
     callURL = folder.appendingPathComponent("call.wav")
     super.init()
+    guard startMic() else { return nil }
+    // A new mic (AirPods connecting, say) stops the engine; carry on in a new file.
+    configObserver = NotificationCenter.default.addObserver(
+      forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+      guard let self, self.isRecordingMic else { return }
+      log("meeting: the microphone changed; carrying on in a new file")
+      self.engine.inputNode.removeTap(onBus: 0)
+      self.closeMicFile()
+      if !self.startMic() { log("meeting: the new microphone couldn't start") }
+    }
+    starting = Task { await startCallAudio() }
+  }
+
+  private var isRecordingMic: Bool { lock.withLock { micFile != nil } }
+
+  // Starts the mic into a new file, numbered after the ones before it, whose start time
+  // is kept so its words land at the right moment in the transcript.
+  private func startMic() -> Bool {
     let input = engine.inputNode
     let format = input.outputFormat(forBus: 0)
+    let part = MicPart(url: folder.appendingPathComponent("mic-\(micParts.count + 1).wav"),
+                       offset: Int(Date().timeIntervalSince(started) * 1000))
     guard format.sampleRate > 0,
-          let file = try? AVAudioFile(forWriting: micURL, settings: format.settings,
+          let file = try? AVAudioFile(forWriting: part.url, settings: format.settings,
                                       commonFormat: format.commonFormat, interleaved: format.isInterleaved) else {
       log("meeting: no microphone input")
-      return nil
+      return false
     }
-    input.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in try? file.write(from: buffer) }
+    lock.withLock {
+      micFile = file
+      micParts.append(part)
+    }
+    input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
+      guard let self else { return }
+      self.lock.withLock { try? self.micFile?.write(from: buffer) }
+    }
     do { try engine.start() } catch {
       log("meeting: could not start the microphone: \(error)")
       input.removeTap(onBus: 0)
-      return nil
+      closeMicFile()
+      return false
     }
-    Task { await startCallAudio() }
+    return true
   }
+
+  // Dropping the AVAudioFile is what writes its header, so Whisper can read it.
+  private func closeMicFile() { lock.withLock { micFile = nil } }
 
   // The Mac's sound through ScreenCaptureKit. Without Screen Recording permission this
   // fails, macOS asks for it once, and the meeting carries on with the mic alone.
@@ -61,7 +98,8 @@ final class MeetingRecording: NSObject, SCStreamOutput, SCStreamDelegate {
   }
 
   func stream(_ stream: SCStream, didOutputSampleBuffer buffer: CMSampleBuffer, of type: SCStreamOutputType) {
-    guard type == .audio, buffer.isValid,
+    // On callQueue, like `stopped`: nothing after Stop reopens or rewrites call.wav.
+    guard type == .audio, !stopped, buffer.isValid,
           let description = buffer.formatDescription?.audioStreamBasicDescription else { return }
     var asbd = description
     guard let format = AVAudioFormat(streamDescription: &asbd) else { return }
@@ -79,40 +117,75 @@ final class MeetingRecording: NSObject, SCStreamOutput, SCStreamDelegate {
     log("meeting: call audio stopped: \(error.localizedDescription)")
   }
 
-  // Stops both, then closes the files so Whisper can read them.
+  // Stops both and closes the files so Whisper can read them. Waits for the call audio to
+  // finish starting first, so a capture that was still starting can't keep running.
   func stop() async {
+    if let configObserver { NotificationCenter.default.removeObserver(configObserver) }
     engine.inputNode.removeTap(onBus: 0)
     engine.stop()
-    if let stream { try? await stream.stopCapture() }
+    closeMicFile()
+    callQueue.sync { stopped = true }
+    await starting?.value
+    if let stream {
+      do { try await stream.stopCapture() } catch { log("meeting: stopping call audio: \(error.localizedDescription)") }
+    }
     stream = nil
     callQueue.sync { callFile = nil }
   }
 }
 
-// Whisper over a whole recording, as segments for `speaker`. Long meetings take minutes, so
-// this runs off the main thread, with a limit that grows with the recording.
-func meetingSegments(_ url: URL, speaker: String, length: TimeInterval) -> [Segment] {
-  guard FileManager.default.fileExists(atPath: url.path), let model = modelPath(), let whisper = whisperPath else { return [] }
+struct MicPart {
+  let url: URL
+  let offset: Int  // ms from the start of the meeting
+}
+
+// The whisper-cli processes transcribing meetings, so quitting can stop them.
+let meetingProcesses = Locked<[Process]>([])
+
+final class Locked<Value> {
+  private let lock = NSLock()
+  private var value: Value
+  init(_ value: Value) { self.value = value }
+  func with<T>(_ body: (inout Value) -> T) -> T { lock.withLock { body(&value) } }
+}
+
+// Whisper over a whole recording, as segments for `speaker` shifted by `offset` ms. Nil when
+// it failed (as opposed to [] for silence), so the audio is kept rather than thrown away.
+// Waits without holding a thread; the limit is three times the recording's length.
+func meetingSegments(_ url: URL, speaker: String, offset: Int = 0, length: TimeInterval) async -> [Segment]? {
+  guard FileManager.default.fileExists(atPath: url.path) else { return [] }
+  guard let model = modelPath(), let whisper = whisperPath else { return nil }
   let base = url.deletingPathExtension().path
   let process = Process()
   process.executableURL = URL(fileURLWithPath: whisper)
   process.arguments = ["-m", model, "-f", url.path, "-l", "auto", "-oj", "-of", base, "-np"]
   process.standardOutput = FileHandle.nullDevice
   process.standardError = FileHandle.nullDevice
-  do { try process.run() } catch {
-    log("meeting: whisper-cli failed to start: \(error)")
-    return []
-  }
-  let limit = max(120, length)  // never slower than the meeting itself
-  DispatchQueue.global().asyncAfter(deadline: .now() + limit) {
-    if process.isRunning {
-      log("meeting: whisper-cli took over \(Int(limit))s on \(url.lastPathComponent); stopped it")
-      process.terminate()
+  let limit = max(300, length * 3)
+  let status: Int32? = await withCheckedContinuation { done in
+    process.terminationHandler = { done.resume(returning: $0.terminationStatus) }
+    do { try process.run() } catch {
+      log("meeting: whisper-cli failed to start: \(error)")
+      process.terminationHandler = nil
+      done.resume(returning: nil)
+      return
+    }
+    meetingProcesses.with { $0.append(process) }
+    DispatchQueue.global().asyncAfter(deadline: .now() + limit) {
+      if process.isRunning {
+        log("meeting: whisper-cli took over \(Int(limit))s on \(url.lastPathComponent); stopped it")
+        process.terminate()
+      }
     }
   }
-  process.waitUntilExit()
-  guard let data = FileManager.default.contents(atPath: base + ".json") else { return [] }
-  return segments(fromWhisperJSON: data, speaker: speaker)
+  meetingProcesses.with { $0.removeAll { $0 === process } }
+  guard status == 0, let data = FileManager.default.contents(atPath: base + ".json") else {
+    log("meeting: whisper-cli failed on \(url.lastPathComponent) (exit \(status.map(String.init) ?? "none"))")
+    return nil
+  }
+  return segments(fromWhisperJSON: data, speaker: speaker).map {
+    Segment(start: $0.start + offset, speaker: $0.speaker, text: $0.text)
+  }
 }
 
 // Asks DeepSeek for the summary. Returns it, or nil with the reason to show in the note.
@@ -124,35 +197,97 @@ func summarize(_ transcript: String) async -> (String?, String?) {
   do {
     let (data, response) = try await URLSession.shared.data(for: summaryRequest(transcript: transcript, key: key))
     let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-    guard status == 200, let text = summary(fromReply: data) else {
-      log("meeting: DeepSeek answered \(status): \(String(decoding: data.prefix(300), as: UTF8.self))")
-      return (nil, status == 402 ? "the DeepSeek balance is empty" : "DeepSeek answered with an error (\(status))")
+    if status == 200, let text = summary(fromReply: data) { return (text, nil) }
+    // Error bodies say what went wrong; a 200 body would be meeting content, so not that.
+    log("meeting: DeepSeek answered \(status)" +
+        (status == 200 ? " with a reply that couldn't be read" : ": \(String(decoding: data.prefix(300), as: UTF8.self))"))
+    switch status {
+    case 200: return (nil, "DeepSeek's reply couldn't be read")
+    case 401: return (nil, "DeepSeek didn't accept the API key")
+    case 402: return (nil, "the DeepSeek balance is empty")
+    default: return (nil, "DeepSeek answered with an error (\(status))")
     }
-    return (text, nil)
   } catch {
     log("meeting: DeepSeek request failed: \(error.localizedDescription)")
     return (nil, "DeepSeek couldn't be reached")
   }
 }
 
-// From a stopped recording to a note in ~/Documents/Meeting Notes, opened when ready.
-// The audio is deleted once the transcript is in the note.
-func writeNotes(_ recording: MeetingRecording, folder: URL) async -> URL? {
-  let length = Date().timeIntervalSince(recording.started)
-  let you = meetingSegments(recording.micURL, speaker: "You", length: length)
-  let others = meetingSegments(recording.callURL, speaker: "Others", length: length)
-  let text = transcript([you, others])
-  let (summaryText, reason) = text.isEmpty ? (nil, "nothing was heard") : await summarize(text)
-  let notes = URL(fileURLWithPath: home + "/Documents/Meeting Notes")
-  try? FileManager.default.createDirectory(at: notes, withIntermediateDirectories: true)
-  let file = notes.appendingPathComponent(noteName(for: recording.started))
-  let body = note(date: recording.started, length: Int(length * 1000), summary: summaryText,
-                  missing: reason, transcript: text)
-  do { try body.write(to: file, atomically: true, encoding: .utf8) } catch {
-    log("meeting: could not save the note: \(error)")
+let meetingNotesFolder = URL(fileURLWithPath: home + "/Documents/Meeting Notes")
+
+// A free path in the notes folder: "<stem><ext>", or "<stem> (2)<ext>" if that's taken.
+// (Stems like "2026-10-17 14.30" contain a dot, so the extension is passed separately.)
+func freeNoteURL(stem: String, ext: String) -> URL {
+  var url = meetingNotesFolder.appendingPathComponent(stem + ext)
+  var n = 2
+  while FileManager.default.fileExists(atPath: url.path) {
+    url = meetingNotesFolder.appendingPathComponent("\(stem) (\(n))\(ext)")
+    n += 1
+  }
+  return url
+}
+
+// Moves a meeting's audio next to the notes, so a failed or interrupted meeting isn't lost.
+// Returns where it went.
+@discardableResult
+func keepAudio(_ folder: URL, started: Date, label: String) -> URL? {
+  try? FileManager.default.createDirectory(at: meetingNotesFolder, withIntermediateDirectories: true)
+  let target = freeNoteURL(stem: noteStem(for: started) + " " + label, ext: "")
+  do { try FileManager.default.moveItem(at: folder, to: target) } catch {
+    log("meeting: could not keep the audio: \(error)")
     return nil
   }
-  try? FileManager.default.removeItem(at: folder)
-  log("meeting: \(Int(length))s, \(you.count + others.count) segments, saved \(file.lastPathComponent)")
+  return target
+}
+
+// From a stopped recording to a note in ~/Documents/Meeting Notes, opened when ready. The
+// audio is deleted once the transcript is in the note; if Whisper failed, it's kept beside it.
+func writeNotes(_ recording: MeetingRecording) async -> URL? {
+  let length = Date().timeIntervalSince(recording.started)
+  let call = await meetingSegments(recording.callURL, speaker: "Others", length: length)
+  // With no one heard through the Mac, it was a room: everyone is on the mic.
+  let micSpeaker = (call ?? []).isEmpty ? "Room" : "You"
+  var mic: [Segment]? = []
+  for part in recording.micParts {
+    guard let found = await meetingSegments(part.url, speaker: micSpeaker, offset: part.offset, length: length) else {
+      mic = nil
+      break
+    }
+    mic? += found
+  }
+  let failed = call == nil || mic == nil
+  let text = transcript([mic ?? [], call ?? []])
+  let (summaryText, reason): (String?, String?)
+  if text.isEmpty {
+    (summaryText, reason) = (nil, failed ? "the transcription failed" : "nothing was heard")
+  } else {
+    (summaryText, reason) = await summarize(text)
+  }
+  try? FileManager.default.createDirectory(at: meetingNotesFolder, withIntermediateDirectories: true)
+  var body = note(date: recording.started, length: Int(length * 1000), summary: summaryText,
+                  missing: reason, transcript: text)
+  if failed, let kept = keepAudio(recording.folder, started: recording.started, label: "audio") {
+    body += "\n_Part of the transcription failed, so the recording is kept in \"\(kept.lastPathComponent)\"._\n"
+  }
+  let file = freeNoteURL(stem: noteStem(for: recording.started), ext: ".md")
+  do { try body.write(to: file, atomically: true, encoding: .utf8) } catch {
+    log("meeting: could not save the note: \(error)")
+    if !failed { keepAudio(recording.folder, started: recording.started, label: "audio") }
+    return nil
+  }
+  if !failed { try? FileManager.default.removeItem(at: recording.folder) }
+  log("meeting: \(Int(length))s, \((mic ?? []).count + (call ?? []).count) segments\(failed ? ", transcription failed" : ""), saved \(file.lastPathComponent)")
   return file
+}
+
+// Meetings left in the temp folder by a quit or crash: moved beside the notes, not deleted.
+func recoverMeetings() {
+  let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+  let found = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.creationDateKey])) ?? []
+  for folder in found where folder.path.hasPrefix(tempPrefix + "meeting-") {
+    let created = (try? folder.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date()
+    if let kept = keepAudio(folder, started: created, label: "unfinished") {
+      log("meeting: kept an unfinished meeting's audio in \(kept.lastPathComponent)")
+    }
+  }
 }
