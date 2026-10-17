@@ -12,9 +12,13 @@ struct Segment: Equatable {
 
 // The segments in whisper-cli's JSON output (-oj): {"transcription": [{"offsets":
 // {"from": ms, "to": ms}, "text": "..."}]}. Blank and noise-only segments are dropped.
-func segments(fromWhisperJSON data: Data, speaker: String) -> [Segment] {
-  guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-        let items = root["transcription"] as? [[String: Any]] else { return [] }
+// Nil when it can't be read, so a failure is never mistaken for silence. whisper.cpp can
+// split a multi-byte character and write invalid UTF-8, so a second try replaces bad bytes.
+func segments(fromWhisperJSON data: Data, speaker: String) -> [Segment]? {
+  let repaired = Data(String(decoding: data, as: UTF8.self).utf8)
+  guard let root = ((try? JSONSerialization.jsonObject(with: data)) ?? (try? JSONSerialization.jsonObject(with: repaired)))
+          as? [String: Any],
+        let items = root["transcription"] as? [[String: Any]] else { return nil }
   return items.compactMap { item in
     let text = clean(item["text"] as? String ?? "")
     guard !text.isEmpty, let start = (item["offsets"] as? [String: Any])?["from"] as? Int else { return nil }
