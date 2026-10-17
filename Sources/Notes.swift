@@ -44,17 +44,19 @@ func clock(_ ms: Int) -> String {
   return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
 }
 
-// "2026-10-17 14.30.md": sorts by date, and has no characters Finder or iCloud dislike.
-func noteName(for date: Date) -> String {
+// "2026-10-17 14.30": sorts by date, and has no characters Finder or iCloud dislike.
+func noteStem(for date: Date) -> String {
   let format = DateFormatter()
   format.locale = Locale(identifier: "en_US_POSIX")
   format.dateFormat = "yyyy-MM-dd HH.mm"
-  return format.string(from: date) + ".md"
+  return format.string(from: date)
 }
 
 let summaryInstructions = """
-  You write meeting notes from a transcript. "You" is the person who recorded the meeting; \
-  "Others" is everyone heard through the call, or the room. The transcript comes from speech \
+  You write meeting notes from a transcript. On a call, "You" is the person who recorded the \
+  meeting and "Others" is everyone heard through the call. "Room" means one microphone heard \
+  everyone in a room, so it can't tell who spoke: name an owner for an action item only when \
+  the transcript says who it is, else write "someone". The transcript comes from speech \
   recognition, so fix obvious mishearings from context, and never invent facts, names, dates \
   or numbers that aren't in it.
 
@@ -116,7 +118,9 @@ func note(date: Date, length ms: Int, summary: String?, missing reason: String?,
 // (KEY=value lines). Nil when neither has one.
 func deepSeekKey(environment: [String: String], config: String?) -> String? {
   if let key = environment["DEEPSEEK_API_KEY"], !key.isEmpty { return key }
-  for line in (config ?? "").split(separator: "\n") {
+  for raw in (config ?? "").split(whereSeparator: \.isNewline) {
+    var line = raw.trimmingCharacters(in: .whitespaces)
+    if line.hasPrefix("export ") { line = String(line.dropFirst(7)) }
     let parts = line.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
     if parts.count == 2, parts[0] == "DEEPSEEK_API_KEY", !parts[1].isEmpty {
       return parts[1].trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
