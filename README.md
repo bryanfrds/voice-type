@@ -33,6 +33,21 @@ Accessibility to see the keys and to paste.
 An orange crossed-out mic means VoiceType is still waiting for Accessibility, or that
 whisper.cpp or the model is missing.
 
+## Meeting notes
+
+Choose **Start meeting notes** in the menu, and **Stop** when the meeting ends. VoiceType records
+your mic as "You" and, on a call, the Mac's sound as "Others". Whisper turns both into a
+transcript on this Mac, DeepSeek writes the summary, decisions and action items, and the note
+opens from `~/Documents/Meeting Notes`. The audio is deleted afterwards.
+
+- **Call audio:** the first time, macOS asks for Screen Recording. Without it, only the mic
+  is recorded, which still works for a meeting in a room.
+- **Summary:** needs a DeepSeek API key. Put `DEEPSEEK_API_KEY=sk-...` in
+  `~/.config/voice-type/config`. Without one, the note has the transcript and says why
+  there's no summary.
+- **Privacy:** the transcript is sent to DeepSeek; the audio never leaves the Mac.
+- **Consent:** tell people you're recording.
+
 ## Notes
 
 - `install.sh` creates a private "VoiceType Local Signing" certificate in your login keychain
