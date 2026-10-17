@@ -12,7 +12,8 @@ final class MeetingRecording: NSObject, SCStreamOutput, SCStreamDelegate {
   private let engine = AVAudioEngine()
   private let lock = NSLock()            // the mic file and parts: main and audio threads
   private var micFile: AVAudioFile?
-  private(set) var micParts: [MicPart] = []
+  private var parts: [MicPart] = []
+  private var micStopped = false         // set first thing in stop(); ends mic restarts
   private var stream: SCStream?
   private var callFile: AVAudioFile?
   private var stopped = false            // read and written on callQueue only
@@ -26,18 +27,21 @@ final class MeetingRecording: NSObject, SCStreamOutput, SCStreamDelegate {
     super.init()
     guard startMic() else { return nil }
     // A new mic (AirPods connecting, say) stops the engine; carry on in a new file.
+    // Runs on main, as stop() does its mic teardown, so the two can't interleave; a failed
+    // restart doesn't end it, so the next change (AirPods finishing connecting) tries again.
     configObserver = NotificationCenter.default.addObserver(
       forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
-      guard let self, self.isRecordingMic else { return }
+      guard let self, !self.lock.withLock({ self.micStopped }) else { return }
       log("meeting: the microphone changed; carrying on in a new file")
       self.engine.inputNode.removeTap(onBus: 0)
       self.closeMicFile()
-      if !self.startMic() { log("meeting: the new microphone couldn't start") }
+      if !self.startMic() { log("meeting: the new microphone couldn't start; waiting for the next change") }
     }
     starting = Task { await startCallAudio() }
   }
 
-  private var isRecordingMic: Bool { lock.withLock { micFile != nil } }
+  // The mic files so far, each with when it started.
+  var micParts: [MicPart] { lock.withLock { parts } }
 
   // Starts the mic into a new file, numbered after the ones before it, whose start time
   // is kept so its words land at the right moment in the transcript.
@@ -54,7 +58,7 @@ final class MeetingRecording: NSObject, SCStreamOutput, SCStreamDelegate {
     }
     lock.withLock {
       micFile = file
-      micParts.append(part)
+      parts.append(part)
     }
     input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
       guard let self else { return }
@@ -120,10 +124,13 @@ final class MeetingRecording: NSObject, SCStreamOutput, SCStreamDelegate {
   // Stops both and closes the files so Whisper can read them. Waits for the call audio to
   // finish starting first, so a capture that was still starting can't keep running.
   func stop() async {
-    if let configObserver { NotificationCenter.default.removeObserver(configObserver) }
-    engine.inputNode.removeTap(onBus: 0)
-    engine.stop()
-    closeMicFile()
+    lock.withLock { micStopped = true }
+    await MainActor.run {
+      if let configObserver { NotificationCenter.default.removeObserver(configObserver) }
+      engine.inputNode.removeTap(onBus: 0)
+      engine.stop()
+      closeMicFile()
+    }
     callQueue.sync { stopped = true }
     await starting?.value
     if let stream {
@@ -162,6 +169,7 @@ func meetingSegments(_ url: URL, speaker: String, offset: Int = 0, length: TimeI
   process.standardOutput = FileHandle.nullDevice
   process.standardError = FileHandle.nullDevice
   let limit = max(300, length * 3)
+  meetingProcesses.with { $0.append(process) }  // before run, so a quit can't miss it
   let status: Int32? = await withCheckedContinuation { done in
     process.terminationHandler = { done.resume(returning: $0.terminationStatus) }
     do { try process.run() } catch {
@@ -170,7 +178,6 @@ func meetingSegments(_ url: URL, speaker: String, offset: Int = 0, length: TimeI
       done.resume(returning: nil)
       return
     }
-    meetingProcesses.with { $0.append(process) }
     DispatchQueue.global().asyncAfter(deadline: .now() + limit) {
       if process.isRunning {
         log("meeting: whisper-cli took over \(Int(limit))s on \(url.lastPathComponent); stopped it")
@@ -179,11 +186,12 @@ func meetingSegments(_ url: URL, speaker: String, offset: Int = 0, length: TimeI
     }
   }
   meetingProcesses.with { $0.removeAll { $0 === process } }
-  guard status == 0, let data = FileManager.default.contents(atPath: base + ".json") else {
+  guard status == 0, let data = FileManager.default.contents(atPath: base + ".json"),
+        let found = segments(fromWhisperJSON: data, speaker: speaker) else {
     log("meeting: whisper-cli failed on \(url.lastPathComponent) (exit \(status.map(String.init) ?? "none"))")
     return nil
   }
-  return segments(fromWhisperJSON: data, speaker: speaker).map {
+  return found.map {
     Segment(start: $0.start + offset, speaker: $0.speaker, text: $0.text)
   }
 }
@@ -245,18 +253,20 @@ func keepAudio(_ folder: URL, started: Date, label: String) -> URL? {
 func writeNotes(_ recording: MeetingRecording) async -> URL? {
   let length = Date().timeIntervalSince(recording.started)
   let call = await meetingSegments(recording.callURL, speaker: "Others", length: length)
-  // With no one heard through the Mac, it was a room: everyone is on the mic.
-  let micSpeaker = (call ?? []).isEmpty ? "Room" : "You"
-  var mic: [Segment]? = []
+  // With no one heard through the Mac, it was a room: everyone is on the mic. (If the call
+  // side failed, that can't be told, so the mic stays "You".)
+  let micSpeaker = call?.isEmpty == true ? "Room" : "You"
+  var mic: [Segment] = []
+  var micFailed = false
   for part in recording.micParts {
-    guard let found = await meetingSegments(part.url, speaker: micSpeaker, offset: part.offset, length: length) else {
-      mic = nil
-      break
+    if let found = await meetingSegments(part.url, speaker: micSpeaker, offset: part.offset, length: length) {
+      mic += found
+    } else {
+      micFailed = true  // the other parts still go in the note; the audio is kept
     }
-    mic? += found
   }
-  let failed = call == nil || mic == nil
-  let text = transcript([mic ?? [], call ?? []])
+  let failed = call == nil || micFailed
+  let text = transcript([mic, call ?? []])
   let (summaryText, reason): (String?, String?)
   if text.isEmpty {
     (summaryText, reason) = (nil, failed ? "the transcription failed" : "nothing was heard")
@@ -276,7 +286,7 @@ func writeNotes(_ recording: MeetingRecording) async -> URL? {
     return nil
   }
   if !failed { try? FileManager.default.removeItem(at: recording.folder) }
-  log("meeting: \(Int(length))s, \((mic ?? []).count + (call ?? []).count) segments\(failed ? ", transcription failed" : ""), saved \(file.lastPathComponent)")
+  log("meeting: \(Int(length))s, \(mic.count + (call ?? []).count) segments\(failed ? ", transcription failed" : ""), saved \(file.lastPathComponent)")
   return file
 }
 
