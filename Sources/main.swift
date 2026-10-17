@@ -76,7 +76,6 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
   var lastText = ""
   let meetingItem = NSMenuItem(title: "Start meeting notes", action: nil, keyEquivalent: "")
   var meeting: MeetingRecording?
-  var meetingFolder: URL?
   var meetingTimer: Timer?
   var pasteCancelled = false
   let warningItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -113,6 +112,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     menu.addItem(withTitle: "Quit VoiceType", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
     statusItem.menu = menu
     trimLog()
+    recoverMeetings()
     removeLeftoverRecordings()
 
     guard whisperPath != nil, let path = modelPath(), FileManager.default.fileExists(atPath: path) else {
@@ -292,20 +292,28 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
   // Meeting notes: Start records the mic and the call until Stop; then the transcript and
   // DeepSeek's summary are saved to ~/Documents/Meeting Notes and the note opens.
   @objc func toggleMeeting() {
-    if let recording = meeting, let folder = meetingFolder {
+    if let recording = meeting {
       meeting = nil
       meetingTimer?.invalidate()
       meetingItem.title = "Writing meeting notes…"
       meetingItem.action = nil
       Task {
         await recording.stop()
-        let note = await writeNotes(recording, folder: folder)
+        let note = await writeNotes(recording)
         await MainActor.run {
           self.meetingItem.title = "Start meeting notes"
           self.meetingItem.action = #selector(self.toggleMeeting)
           if let note { NSWorkspace.shared.open(note) } else { self.say("Couldn't save the meeting notes") }
         }
       }
+      return
+    }
+    guard whisperPath != nil, let model = modelPath(), FileManager.default.fileExists(atPath: model) else {
+      say("Meeting notes need whisper.cpp and a model: run install.sh")
+      return
+    }
+    guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else {
+      say("Meeting notes need microphone access")
       return
     }
     let folder = URL(fileURLWithPath: tempPrefix + "meeting-\(UUID().uuidString)")
@@ -316,7 +324,6 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
       return
     }
     meeting = recording
-    meetingFolder = folder
     log("meeting: started")
     let update = { [weak self] in
       guard let self, let recording = self.meeting else { return }
@@ -374,6 +381,21 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let dir = URL(fileURLWithPath: NSTemporaryDirectory())
     let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
     for file in files where file.path.hasPrefix(tempPrefix) { try? FileManager.default.removeItem(at: file) }
+  }
+
+  // Quitting mid-meeting stops the recording and keeps its audio beside the notes, rather
+  // than losing it; transcribing it is left for later. Whisper runs for meetings are stopped.
+  func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    meetingProcesses.with { $0.forEach { $0.terminate() } }
+    guard let recording = meeting else { return .terminateNow }
+    meeting = nil
+    Task {
+      await recording.stop()
+      keepAudio(recording.folder, started: recording.started, label: "unfinished")
+      log("meeting: quit mid-meeting; kept the audio")
+      await MainActor.run { NSApp.reply(toApplicationShouldTerminate: true) }
+    }
+    return .terminateLater
   }
 }
 
