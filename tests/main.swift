@@ -116,10 +116,18 @@ let whisperJSON = Data("""
     {"offsets": {"from": 9000, "to": 12000}, "text": " Budget is RM5,000."}
   ]}
   """.utf8)
-let you = segments(fromWhisperJSON: whisperJSON, speaker: "You")
+let you = segments(fromWhisperJSON: whisperJSON, speaker: "You") ?? []
 check("Whisper segments are read, noise dropped", you.map(\.text), ["Shall we start?", "Budget is RM5,000."])
 check("a segment keeps its start time", you.first?.start, 0)
-check("bad JSON gives no segments", segments(fromWhisperJSON: Data("nope".utf8), speaker: "You"), [])
+check("unreadable output is a failure, not silence", segments(fromWhisperJSON: Data("nope".utf8), speaker: "You"), nil)
+check("no speech is an empty list, not a failure",
+      segments(fromWhisperJSON: Data(#"{"transcription": []}"#.utf8), speaker: "You"), [])
+// whisper.cpp can cut a multi-byte character in half, leaving invalid UTF-8 in the JSON.
+var broken = Data(#"{"transcription": [{"offsets": {"from": 0, "to": 900}, "text": " 你好 "#.utf8)
+broken.append(contentsOf: [0xE4, 0xBD])  // the first two of a character's three bytes
+broken.append(contentsOf: Data(#" ok"}]}"#.utf8))
+check("invalid UTF-8 from Whisper is repaired, not lost",
+      segments(fromWhisperJSON: broken, speaker: "Others")?.first?.text.hasPrefix("你好"), true)
 let others = [Segment(start: 3000, speaker: "Others", text: "Yes."), Segment(start: 5000, speaker: "Others", text: "Go ahead.")]
 check("both sides merge in time order, a speaker's run joined",
       transcript([you, others]),
