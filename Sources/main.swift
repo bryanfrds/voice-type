@@ -316,7 +316,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     case .authorized: break
     case .notDetermined:
       AVCaptureDevice.requestAccess(for: .audio) { granted in
-        DispatchQueue.main.async { if granted { self.toggleMeeting() } }
+        DispatchQueue.main.async {
+          // Only start: a second click during the prompt mustn't turn into a Stop.
+          if !granted { self.say("Meeting notes need microphone access") } else if self.meeting == nil { self.toggleMeeting() }
+        }
       }
       return
     default:
@@ -397,7 +400,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
   // Quitting mid-meeting stops the recording and keeps its audio beside the notes, rather
   // than losing it; transcribing it is left for later. Whisper runs for meetings are stopped.
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-    meetingProcesses.with { $0.forEach { $0.terminate() } }
+    meetingProcesses.with { $0.filter(\.isRunning).forEach { $0.terminate() } }  // a not-yet-launched one can't be
     guard let recording = meeting else { return .terminateNow }
     meeting = nil
     Task {
