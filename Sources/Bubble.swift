@@ -16,8 +16,8 @@ final class Bubble {
     panel = Bubble.makePanel(width: width, label: label)
   }
 
-  // After the Mac sleeps, a panel can lose its place on every Space and stay stuck on one
-  // desktop, out of sight. So each time the bubble appears it gets a new panel.
+  // Seen after the Mac sleeps: a panel can lose its place on every Space and stay stuck on
+  // one desktop, out of sight. So each time the bubble appears it gets a new panel.
   private static func makePanel(width: CGFloat, label: NSTextField) -> NSPanel {
     let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: width, height: 50),
                     styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
@@ -60,11 +60,12 @@ final class Bubble {
     // On the screen you're typing on, not wherever the mouse was left. Chosen when the
     // bubble appears and kept while it shows, so live words don't ask Accessibility
     // several times a second or make the bubble jump screens mid-sentence.
-    if !panel.isVisible || area == nil {
-      if !panel.isVisible {
-        panel.close()
-        panel = Bubble.makePanel(width: width, label: label)
-      }
+    if !panel.isVisible {
+      panel.close()
+      panel = Bubble.makePanel(width: width, label: label)
+      area = nil
+    }
+    if area == nil {
       let screens = NSScreen.screens
       let screen = screenIndex(window: focusedWindowFrame(), mouse: NSEvent.mouseLocation,
                                screens: screens.map(\.frame)).map { screens[$0] } ?? NSScreen.main
@@ -77,6 +78,7 @@ final class Bubble {
   }
 
   var isShowing: Bool { panel.isVisible }
+  var panelForTesting: NSPanel { panel }
 
   func hide() {
     hideTimer?.invalidate()
