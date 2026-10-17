@@ -74,6 +74,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
   var modelItems: [NSMenuItem] = []
   let lastItem = NSMenuItem(title: "No dictation yet", action: nil, keyEquivalent: "")
   var lastText = ""
+  let meetingItem = NSMenuItem(title: "Start meeting notes", action: nil, keyEquivalent: "")
+  var meeting: MeetingRecording?
+  var meetingFolder: URL?
+  var meetingTimer: Timer?
   var pasteCancelled = false
   let warningItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
   var warningPane = ""
@@ -99,6 +103,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     if !modelItems.isEmpty { menu.addItem(.separator()) }
     markPickedModel()
 
+    meetingItem.target = self
+    meetingItem.action = #selector(toggleMeeting)
+    menu.addItem(meetingItem)
+    menu.addItem(.separator())
     lastItem.target = self
     menu.addItem(lastItem)
     menu.addItem(.separator())
@@ -279,6 +287,45 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     lastText = text
     lastItem.title = "Copy “\(preview(text))”"
     lastItem.action = #selector(copyLast)
+  }
+
+  // Meeting notes: Start records the mic and the call until Stop; then the transcript and
+  // DeepSeek's summary are saved to ~/Documents/Meeting Notes and the note opens.
+  @objc func toggleMeeting() {
+    if let recording = meeting, let folder = meetingFolder {
+      meeting = nil
+      meetingTimer?.invalidate()
+      meetingItem.title = "Writing meeting notes…"
+      meetingItem.action = nil
+      Task {
+        await recording.stop()
+        let note = await writeNotes(recording, folder: folder)
+        await MainActor.run {
+          self.meetingItem.title = "Start meeting notes"
+          self.meetingItem.action = #selector(self.toggleMeeting)
+          if let note { NSWorkspace.shared.open(note) } else { self.say("Couldn't save the meeting notes") }
+        }
+      }
+      return
+    }
+    let folder = URL(fileURLWithPath: tempPrefix + "meeting-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    guard let recording = MeetingRecording(folder: folder) else {
+      try? FileManager.default.removeItem(at: folder)
+      say("Couldn't start the microphone")
+      return
+    }
+    meeting = recording
+    meetingFolder = folder
+    log("meeting: started")
+    let update = { [weak self] in
+      guard let self, let recording = self.meeting else { return }
+      self.meetingItem.title = "Stop meeting notes (\(clock(Int(Date().timeIntervalSince(recording.started) * 1000))))"
+    }
+    update()
+    let timer = Timer(timeInterval: 1, repeats: true) { _ in update() }
+    RunLoop.main.add(timer, forMode: .common)  // keeps ticking while the menu is open
+    meetingTimer = timer
   }
 
   @objc func copyLast() {
