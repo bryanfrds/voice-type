@@ -48,7 +48,9 @@ let fresh = Bubble()
 autoreleasepool { fresh.show("Before"); old = fresh.panelForTesting; fresh.hide() }
 wait(0.05)
 autoreleasepool { fresh.show("After"); fresh.hide() }
-wait(0.2)
+// AppKit lets go of a closed window on its own schedule, so give it up to two seconds,
+// draining the pool each turn as the app's event loop would.
+for _ in 0..<40 where old != nil { autoreleasepool { wait(0.05) } }
 check("an old panel is freed, not leaked", old == nil)
 
 if failures > 0 {
