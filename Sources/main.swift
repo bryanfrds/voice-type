@@ -312,7 +312,14 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
       say("Meeting notes need whisper.cpp and a model: run install.sh")
       return
     }
-    guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else {
+    switch AVCaptureDevice.authorizationStatus(for: .audio) {
+    case .authorized: break
+    case .notDetermined:
+      AVCaptureDevice.requestAccess(for: .audio) { granted in
+        DispatchQueue.main.async { if granted { self.toggleMeeting() } }
+      }
+      return
+    default:
       say("Meeting notes need microphone access")
       return
     }
@@ -380,7 +387,11 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
   func removeLeftoverRecordings() {
     let dir = URL(fileURLWithPath: NSTemporaryDirectory())
     let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
-    for file in files where file.path.hasPrefix(tempPrefix) { try? FileManager.default.removeItem(at: file) }
+    // Meeting folders are never deleted here: one recoverMeetings() couldn't move is retried
+    // at the next launch.
+    for file in files where file.path.hasPrefix(tempPrefix) && !file.path.hasPrefix(tempPrefix + "meeting-") {
+      try? FileManager.default.removeItem(at: file)
+    }
   }
 
   // Quitting mid-meeting stops the recording and keeps its audio beside the notes, rather
