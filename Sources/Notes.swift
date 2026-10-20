@@ -132,3 +132,8 @@ func deepSeekKey(environment: [String: String], config: String?) -> String? {
   }
   return nil
 }
+
+// The menu's progress line while a meeting is transcribed, one step per audio file.
+func transcribingStep(_ step: Int, of total: Int) -> String {
+  total > 1 ? "Transcribing meeting \(step) of \(total)…" : "Transcribing meeting…"
+}

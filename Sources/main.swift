@@ -297,7 +297,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
       meetingItem.action = nil
       Task {
         await recording.stop()
-        let note = await writeNotes(recording)
+        let note = await writeNotes(recording) { step in
+          await MainActor.run { self.meetingItem.title = step }
+        }
         await MainActor.run {
           self.meetingItem.title = "Start meeting notes"
           self.meetingItem.action = #selector(self.toggleMeeting)

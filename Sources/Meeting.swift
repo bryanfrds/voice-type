@@ -253,15 +253,20 @@ func keepAudio(_ folder: URL, started: Date, label: String) -> URL? {
 
 // From a stopped recording to a note in ~/Documents/Meeting Notes, opened when ready. The
 // audio is deleted once the transcript is in the note; if Whisper failed, it's kept beside it.
-func writeNotes(_ recording: MeetingRecording) async -> URL? {
+// `progress` hears each step ("Transcribing 1 of 2…", "Summarizing…").
+func writeNotes(_ recording: MeetingRecording, progress: @escaping (String) async -> Void = { _ in }) async -> URL? {
   let length = Date().timeIntervalSince(recording.started)
+  let parts = recording.micParts
+  let steps = parts.count + 1
+  await progress(transcribingStep(1, of: steps))
   let call = await meetingSegments(recording.callURL, speaker: "Others", length: length)
   // With no one heard through the Mac, it was a room: everyone is on the mic. (If the call
   // side failed, that can't be told, so the mic stays "You".)
   let micSpeaker = call?.isEmpty == true ? "Room" : "You"
   var mic: [Segment] = []
   var micFailed = false
-  for part in recording.micParts {
+  for (i, part) in parts.enumerated() {
+    await progress(transcribingStep(i + 2, of: steps))
     if let found = await meetingSegments(part.url, speaker: micSpeaker, offset: part.offset, length: length) {
       mic += found
     } else {
@@ -274,6 +279,7 @@ func writeNotes(_ recording: MeetingRecording) async -> URL? {
   if text.isEmpty {
     (summaryText, reason) = (nil, failed ? "the transcription failed" : "nothing was heard")
   } else {
+    await progress("Summarizing meeting notes…")
     (summaryText, reason) = await summarize(text)
   }
   try? FileManager.default.createDirectory(at: meetingNotesFolder, withIntermediateDirectories: true)
