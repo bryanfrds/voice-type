@@ -280,7 +280,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     for item in modelItems {
       item.state = (item.representedObject as? String).map { modelDir + $0 } == inUse ? .on : .off
     }
-}
+  }
 
   // The menu keeps the last dictation, so it can be copied again if the paste went astray.
   func remember(_ text: String) {
