@@ -6,14 +6,13 @@ final class Bubble {
   private let padding: CGFloat = 16
   // Longer speech shows only its end, so the bubble stays at most a few lines tall.
   private let maxCharacters = 180
-  private var panel: NSPanel
+  private var panel: NSPanel?   // made when the bubble first appears
   private let label = NSTextField(wrappingLabelWithString: "")
   private var hideTimer: Timer?
   private var area: NSRect?   // the visible part of the screen the bubble is on
 
   init() {
     label.font = .systemFont(ofSize: 15)
-    panel = Bubble.makePanel(width: width, label: label)
   }
 
   // Seen after the Mac sleeps: a panel can lose its place on every Space and stay stuck on
@@ -60,9 +59,13 @@ final class Bubble {
     // On the screen you're typing on, not wherever the mouse was left. Chosen when the
     // bubble appears and kept while it shows, so live words don't ask Accessibility
     // several times a second or make the bubble jump screens mid-sentence.
-    if !panel.isVisible {
-      panel.close()
+    let panel: NSPanel
+    if let current = self.panel, current.isVisible {
+      panel = current
+    } else {
+      self.panel?.close()
       panel = Bubble.makePanel(width: width, label: label)
+      self.panel = panel
       area = nil
     }
     if area == nil {
@@ -77,12 +80,12 @@ final class Bubble {
     panel.orderFrontRegardless()
   }
 
-  var isShowing: Bool { panel.isVisible }
-  var panelForTesting: NSPanel { panel }
+  var isShowing: Bool { panel?.isVisible ?? false }
+  var panelForTesting: NSPanel? { panel }
 
   func hide() {
     hideTimer?.invalidate()
-    panel.orderOut(nil)
+    panel?.orderOut(nil)
     area = nil
   }
 }
