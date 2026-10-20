@@ -48,6 +48,14 @@ func clock(_ ms: Int) -> String {
   return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
 }
 
+// The folder, made first if it isn't there yet, so the menu can open it before the first
+// meeting has been written. Nil when it can't be made.
+func existingFolder(_ url: URL) -> URL? {
+  try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+  var isFolder: ObjCBool = false
+  return FileManager.default.fileExists(atPath: url.path, isDirectory: &isFolder) && isFolder.boolValue ? url : nil
+}
+
 // "2026-10-17 14.30": sorts by date, and has no characters Finder or iCloud dislike.
 func noteStem(for date: Date) -> String {
   let format = DateFormatter()

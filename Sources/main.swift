@@ -374,10 +374,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?\(warningPane)")!)
   }
 
-  // Made first, so the item works before the first meeting has been written.
   @objc func openNotesFolder() {
-    try? FileManager.default.createDirectory(at: meetingNotesFolder, withIntermediateDirectories: true)
-    NSWorkspace.shared.open(meetingNotesFolder)
+    if let folder = existingFolder(meetingNotesFolder) { NSWorkspace.shared.open(folder) }
   }
 
   func hideBubble() {

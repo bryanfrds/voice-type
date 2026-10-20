@@ -39,7 +39,7 @@ Choose **Start meeting notes** in the menu, and **Stop** when the meeting ends. 
 your mic as "You" and, on a call, the Mac's sound as "Others". Whisper turns both into a
 transcript on this Mac, DeepSeek writes the summary, decisions and action items, and the note
 opens from `~/Documents/Meeting Notes`. The audio is deleted afterwards. **Open Meeting Notes
- folder** in the menu shows all of them.
+folder** in the menu shows all of them.
 
 - **Call audio:** the first time, macOS asks for Screen Recording. Without it, only the mic
   is recorded, which still works for a meeting in a room.
