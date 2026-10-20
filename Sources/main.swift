@@ -251,7 +251,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
                  held, text.count, Date().timeIntervalSince(began)))
       try? FileManager.default.removeItem(at: url)
       DispatchQueue.main.async {
-        switch finish(text, pasteCancelled: self.pasteCancelled) {
+        switch afterTranscribing(text, pasteCancelled: self.pasteCancelled) {
         case .sayNothingHeard: self.say("Didn't catch that")
         case .nothing: break
         case .paste:
