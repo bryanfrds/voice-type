@@ -20,7 +20,7 @@ enum Finish: Equatable { case sayNothingHeard, paste, keepOnly, nothing }
 
 // What to do once Whisper is done. After Esc the text is kept for the menu but not pasted, and
 // no "Didn't catch that" note brings back the bubble the user just dismissed.
-func finish(_ text: String, pasteCancelled: Bool) -> Finish {
+func afterTranscribing(_ text: String, pasteCancelled: Bool) -> Finish {
   if text.isEmpty { return pasteCancelled ? .nothing : .sayNothingHeard }
   return pasteCancelled ? .keepOnly : .paste
 }
