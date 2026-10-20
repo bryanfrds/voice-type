@@ -35,8 +35,14 @@ func preview(_ text: String, limit: Int = 40) -> String {
   guard text.count > limit else { return text }
   let uncut = text.prefix(limit)
   var start = uncut
-  // Back up to a word boundary, unless the cut already falls on one.
-  if text.dropFirst(limit).first != " ", let space = start.lastIndex(of: " ") { start = start[..<space] }
+  // Back up to a word boundary, unless the cut already falls on one: before whitespace, or
+  // before punctuation that ends the word ("world," keeps "world"). Punctuation inside a
+  // word ("don't", "well-known", "3.14") is followed by a letter or digit, so it isn't an end.
+  let rest = text.dropFirst(limit)
+  let atBoundary = rest.first.map { c in
+    c.isWhitespace || (c.isPunctuation && (rest.dropFirst().first.map { !$0.isLetter && !$0.isNumber } ?? true))
+  } ?? true
+  if !atBoundary, let space = start.lastIndex(of: " ") { start = start[..<space] }
   // Trailing punctuation and spaces read badly before the "…"; leading ones are kept.
   var end = start
   while let last = end.last, last.isPunctuation || last.isWhitespace { end = end.dropLast() }
