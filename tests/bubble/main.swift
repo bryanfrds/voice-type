@@ -29,6 +29,8 @@ wait(0.3)
 check("a note hidden early doesn't hide what comes next", bubble.isShowing)
 bubble.hide()
 
+check("no panel is made before the bubble first shows", Bubble().panelForTesting == nil)
+
 // A fresh panel each time the bubble appears, so a panel stranded on one Space by sleep is
 // never reused; the same panel while it stays up, so it isn't rebuilt mid-sentence.
 bubble.show("One")
@@ -39,7 +41,7 @@ bubble.hide()
 bubble.show("Again")
 check("appearing again gets a new panel", bubble.panelForTesting !== first)
 check("the new panel still joins every Space",
-      bubble.panelForTesting.collectionBehavior.contains(.canJoinAllSpaces))
+      bubble.panelForTesting?.collectionBehavior.contains(.canJoinAllSpaces) == true)
 bubble.hide()
 
 // The app empties its autorelease pool after every event; each step here does the same.
