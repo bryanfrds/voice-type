@@ -170,6 +170,15 @@ check("a note with a summary has no missing line", full.contains("_No summary"),
 check("one audio file: no step count", transcribingStep(1, of: 1), "Transcribing meeting…")
 check("several files: which one of how many", transcribingStep(2, of: 3), "Transcribing meeting 2 of 3…")
 
+let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("vt-notes-\(getpid())")
+let notesFolder = scratch.appendingPathComponent("Meeting Notes")
+check("a missing notes folder is made", existingFolder(notesFolder), notesFolder)
+check("an existing one is left as it is", existingFolder(notesFolder), notesFolder)
+let aFile = scratch.appendingPathComponent("file")
+FileManager.default.createFile(atPath: aFile.path, contents: nil)
+check("a file in the way gives nil, not a folder", existingFolder(aFile), nil)
+try? FileManager.default.removeItem(at: scratch)
+
 if failures > 0 {
   print("\(failures) failed")
   exit(1)

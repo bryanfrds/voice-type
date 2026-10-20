@@ -104,6 +104,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     meetingItem.target = self
     meetingItem.action = #selector(toggleMeeting)
     menu.addItem(meetingItem)
+    let notesItem = NSMenuItem(title: "Open Meeting Notes folder", action: #selector(openNotesFolder), keyEquivalent: "")
+    notesItem.target = self
+    menu.addItem(notesItem)
     menu.addItem(.separator())
     lastItem.target = self
     menu.addItem(lastItem)
@@ -369,6 +372,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
   @objc func openWarningPane() {
     NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?\(warningPane)")!)
+  }
+
+  @objc func openNotesFolder() {
+    if let folder = existingFolder(meetingNotesFolder) { NSWorkspace.shared.open(folder) }
   }
 
   func hideBubble() {
