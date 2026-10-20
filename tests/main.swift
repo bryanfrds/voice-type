@@ -161,6 +161,8 @@ let full = note(date: meetingDate, length: 61_000, summary: "## Summary\n- Budge
 check("a note with a summary puts it before the transcript",
       (full.range(of: "## Summary")?.lowerBound).map { $0 < full.range(of: "## Transcript")!.lowerBound }, true)
 check("a note with a summary has no missing line", full.contains("_No summary"), false)
+check("one audio file: no step count", transcribingStep(1, of: 1), "Transcribing meeting…")
+check("several files: which one of how many", transcribingStep(2, of: 3), "Transcribing meeting 2 of 3…")
 
 if failures > 0 {
   print("\(failures) failed")
