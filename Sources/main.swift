@@ -65,7 +65,6 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
   var recording: Recording?
   let bubble = Bubble()
   var words = ""
-  var bubbleShown = false
   var state = State.idle
   var startedAt = Date()
   var feedbackTimer: Timer?
@@ -202,7 +201,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     guard let recording = Recording(url: url, onWords: { [weak self] words in
       guard let self, self.state == .recording else { return }
       self.words = words
-      if self.bubbleShown { self.bubble.show(words) }
+      if self.bubble.isShowing { self.bubble.show(words) }
     }) else { return }
     self.recording = recording
     state = .recording
@@ -210,7 +209,6 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     feedbackTimer = Timer.scheduledTimer(withTimeInterval: feedbackDelay, repeats: false) { _ in
       self.show("mic.fill", tint: .systemRed)
       NSSound(named: "Tink")?.play()
-      self.bubbleShown = true
       if self.words.isEmpty { self.bubble.show("Listening…", dim: true) } else { self.bubble.show(self.words) }
     }
     limitTimer = Timer.scheduledTimer(withTimeInterval: maximumHold, repeats: false) { _ in
@@ -241,7 +239,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     state = .transcribing
     pasteCancelled = false
     show("ellipsis", tint: nil)
-    if bubbleShown { bubble.show(words.isEmpty ? "…" : words + " …", dim: true) }
+    if bubble.isShowing { bubble.show(words.isEmpty ? "…" : words + " …", dim: true) }
     let url = recording.url
     let held = Date().timeIntervalSince(startedAt)
     DispatchQueue.global(qos: .userInitiated).async {
@@ -373,7 +371,6 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
   func hideBubble() {
     bubble.hide()
-    bubbleShown = false
   }
 
   // Shows a short note in the bubble for a moment. Anything shown after it cancels the hide.
