@@ -139,6 +139,28 @@ check("both sides merge in time order, a speaker's run joined",
       transcript([you, others]),
       "[0:00] You: Shall we start?\n[0:03] Others: Yes. Go ahead.\n[0:09] You: Budget is RM5,000.")
 check("nothing heard: empty transcript", transcript([[], []]), "")
+
+let turnJSON = Data("""
+  {"transcription": [
+    {"offsets": {"from": 0, "to": 3800}, "text": " Okay Houston, we've had a problem.", "speaker_turn_next": true},
+    {"offsets": {"from": 4800, "to": 6200}, "text": " Say again, please.", "speaker_turn_next": false},
+    {"offsets": {"from": 6900, "to": 8300}, "text": " We've had a problem.", "speaker_turn_next": true}
+  ]}
+  """.utf8)
+check("a turn is where the segment after a marked one starts; a last mark has nothing after it",
+      speakerTurns(fromWhisperJSON: turnJSON), [4800])
+check("output with no turn marks has no turns", speakerTurns(fromWhisperJSON: whisperJSON), [])
+check("unreadable turn output is nil", speakerTurns(fromWhisperJSON: Data("nope".utf8)), nil)
+let room = [Segment(start: 0, speaker: "Room", text: "Okay Houston, we've had a problem."),
+            Segment(start: 4700, speaker: "Room", text: "Say again, please."),
+            Segment(start: 6900, speaker: "Room", text: "We've had a problem.")]
+let marked = markingTurns(room, at: [4800, 6400, 20_000])
+check("each turn marks the segment starting nearest it", marked.map(\.turn), [false, true, true])
+check("a turn 1.6 s from the nearest segment is left out", markingTurns(room, at: [8500]).map(\.turn), [false, false, false])
+check("a turn 1.5 s from it still counts", markingTurns(room, at: [8400]).map(\.turn), [false, false, true])
+check("a room's speaker changes start new lines; the rest of a turn joins its line",
+      transcript([markingTurns(room, at: [4800])]),
+      "[0:00] Room: Okay Houston, we've had a problem.\n[0:04] Room: Say again, please. We've had a problem.")
 check("minutes and seconds", clock(754_000), "12:34")
 check("hours when past an hour", clock(3_723_000), "1:02:03")
 var utc = Calendar(identifier: .gregorian)
