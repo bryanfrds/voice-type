@@ -29,6 +29,19 @@ func segments(fromWhisperJSON data: Data, speaker: String) -> [Segment]? {
   }
 }
 
+// A recording's segments moved `offset` ms later, to where the recording sits in the meeting.
+func shifted(_ segments: [Segment], by offset: Int) -> [Segment] {
+  segments.map { Segment(start: $0.start + offset, speaker: $0.speaker, text: $0.text, end: $0.end.map { $0 + offset }) }
+}
+
+// whisper-cli's options for one side of a meeting. In a room, segments of at most 50
+// characters, cut between words: short enough that one rarely holds two people, so each can be
+// given to whoever was speaking (a speaker's run is joined again in the transcript). A call's
+// sides are already apart, so they're left whole.
+func segmentOptions(for speaker: String) -> [String] {
+  speaker == "Room" ? ["-ml", "50", "-sow"] : []
+}
+
 // A stretch of time one voice was heard, from sherpa-onnx's speaker diarization. `speaker`
 // tells voices apart within one recording, and means nothing across recordings.
 struct VoiceSpan: Equatable {
@@ -72,6 +85,14 @@ func labellingSpeakers(_ segments: [Segment], spans: [VoiceSpan], numbers: inout
 func labellingSpeakers(_ segments: [Segment], spans: [VoiceSpan]) -> [Segment] {
   var numbers: [String: Int] = [:]
   return labellingSpeakers(segments, spans: spans, numbers: &numbers)
+}
+
+// Labels one mic file's words with that file's voices. Each file's voices are told apart on
+// their own, so their names are made unique to the file (`part`): after a mic change the same
+// people get new numbers, and a file whose voices weren't found stays "Room".
+func labellingPart(_ segments: [Segment], voices: [VoiceSpan], part: Int, numbers: inout [String: Int]) -> [Segment] {
+  let own = voices.map { VoiceSpan(start: $0.start, end: $0.end, speaker: "\(part)-\($0.speaker)") }
+  return labellingSpeakers(segments, spans: own, numbers: &numbers)
 }
 
 // How far a span is from start...end, in ms; 0 when they overlap.

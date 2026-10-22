@@ -204,23 +204,17 @@ func runTool(_ path: String, _ arguments: [String], output: URL? = nil, on url: 
 // Whisper over a whole recording, as segments for `speaker` shifted by `offset` ms. Nil when
 // it failed (as opposed to [] for silence), so the audio is kept rather than thrown away.
 func meetingSegments(_ url: URL, speaker: String, offset: Int = 0, length: TimeInterval) async -> [Segment]? {
-  // In a room, segments of at most 50 characters, cut between words: short enough that one
-  // rarely holds two people, so each can be given to whoever was speaking. A speaker's run is
-  // joined again in the transcript. A call's sides are already apart, so they're left whole.
-  let short = speaker == "Room" ? ["-ml", "50", "-sow"] : []
   guard FileManager.default.fileExists(atPath: url.path) else { return [] }
   let base = url.deletingPathExtension().path
   guard let model = modelPath(), let whisper = whisperPath,
-        await runTool(whisper, ["-m", model, "-l", "auto"] + short + ["-f", url.path, "-oj", "-of", base, "-np"],
+        await runTool(whisper, ["-m", model, "-l", "auto"] + segmentOptions(for: speaker) + ["-f", url.path, "-oj", "-of", base, "-np"],
                       on: url, length: length, purpose: "transcribing"),
         let data = FileManager.default.contents(atPath: base + ".json"),
         let found = segments(fromWhisperJSON: data, speaker: speaker) else {
     log("meeting: no transcript for \(url.lastPathComponent)")
     return nil
   }
-  return found.map {
-    Segment(start: $0.start + offset, speaker: $0.speaker, text: $0.text, end: $0.end.map { $0 + offset })
-  }
+  return shifted(found, by: offset)
 }
 
 // sherpa-onnx's speaker diarization and its two models, which install.sh puts beside the
@@ -325,12 +319,8 @@ func writeNotes(_ recording: MeetingRecording, progress: @escaping (String) asyn
     if var found = await meetingSegments(part.url, speaker: micSpeaker, offset: part.offset, length: length) {
       if micSpeaker == "Room", !found.isEmpty {
         await progress("Telling voices apart…")
-        // Each file's voices are told apart on their own, and only label that file's words,
-        // so after a mic change the same people get new numbers.
-        let voices = await meetingVoices(part.url, offset: part.offset, length: length).map {
-          VoiceSpan(start: $0.start, end: $0.end, speaker: "\(i)-\($0.speaker)")
-        }
-        found = labellingSpeakers(found, spans: voices, numbers: &numbers)
+        let voices = await meetingVoices(part.url, offset: part.offset, length: length)
+        found = labellingPart(found, voices: voices, part: i, numbers: &numbers)
       }
       mic += found
     } else {

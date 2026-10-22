@@ -182,6 +182,17 @@ check("a tie goes to the voice whose name sorts first",
       labellingSpeakers([Segment(start: 3000, speaker: "Room", text: "One.", end: 4000),
                          Segment(start: 0, speaker: "Room", text: "Even.", end: 2000)], spans: tie).map(\.speaker),
       ["Speaker 1", "Speaker 2"])
+check("shifting moves both ends", shifted([Segment(start: 100, speaker: "Room", text: "Hi.", end: 900)], by: 5000),
+      [Segment(start: 5100, speaker: "Room", text: "Hi.", end: 5900)])
+check("only a room's words are cut short", [segmentOptions(for: "Room"), segmentOptions(for: "You"), segmentOptions(for: "Others")],
+      [["-ml", "50", "-sow"], [], []])
+var parts: [String: Int] = [:]
+let fileOne = labellingPart([room[0]], voices: [VoiceSpan(start: 0, end: 4000, speaker: "speaker_00")], part: 0, numbers: &parts)
+let fileTwo = labellingPart([Segment(start: 9000, speaker: "Room", text: "New mic.", end: 9500)],
+                            voices: [VoiceSpan(start: 9000, end: 9500, speaker: "speaker_00")], part: 1, numbers: &parts)
+let fileThree = labellingPart([Segment(start: 12000, speaker: "Room", text: "Nobody.", end: 12500)], voices: [], part: 2, numbers: &parts)
+check("the same voice name in two mic files is two people, numbered on from the first",
+      (fileOne + fileTwo + fileThree).map(\.speaker), ["Speaker 1", "Speaker 2", "Room"])
 var shared: [String: Int] = [:]
 let partOne = labellingSpeakers([room[0]], spans: [VoiceSpan(start: 0, end: 4000, speaker: "0-speaker_00")], numbers: &shared)
 let partTwo = labellingSpeakers([Segment(start: 9000, speaker: "Room", text: "After the mic changed.", end: 9500)],
