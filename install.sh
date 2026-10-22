@@ -5,7 +5,6 @@ set -euo pipefail
 cd "$(dirname "$0")"
 model_dir="$HOME/.local/share/voice-type"
 model="$model_dir/ggml-small.en.bin"
-turn_model="$model_dir/ggml-small.en-tdrz.bin"
 label=com.bryanfrds.voice-type
 agent="$HOME/Library/LaunchAgents/$label.plist"
 
@@ -16,12 +15,33 @@ if [ ! -f "$model" ]; then
   curl -fL -o "$model.part" https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin
   mv "$model.part" "$model"
 fi
-# Marks where a new person starts talking in meeting notes recorded in a room.
-if [ ! -f "$turn_model" ]; then
-  curl -fL -o "$turn_model.part" https://huggingface.co/akashmjn/tinydiarize-whisper.cpp/resolve/main/ggml-small.en-tdrz.bin
-  echo "ceac3ec06d1d98ef71aec665283564631055fd6129b79d8e1be4f9cc33cc54b4  $turn_model.part" | shasum -a 256 -c --quiet
-  mv "$turn_model.part" "$turn_model"
+# Tells people apart by voice in meeting notes recorded in a room: sherpa-onnx's speaker
+# diarization tool and its two models, each checked against the file that was tested.
+sherpa=https://github.com/k2-fsa/sherpa-onnx/releases/download
+fetch() {  # url, sha256, destination
+  [ -f "$3" ] && return
+  curl -fL -o "$3.part" "$1"
+  echo "$2  $3.part" | shasum -a 256 -c --quiet
+  mv "$3.part" "$3"
+}
+if [ ! -x "$model_dir/sherpa-onnx-offline-speaker-diarization" ]; then
+  tmp=$(mktemp -d)
+  fetch "$sherpa/v1.13.8/sherpa-onnx-v1.13.8-osx-arm64-static-no-tts.tar.bz2" \
+    1038a379fff5365b684e05cbbb9ab3577c1a2f6b1736a4d53a6746860d7eddd4 "$tmp/sherpa.tar.bz2"
+  tar xjf "$tmp/sherpa.tar.bz2" -C "$tmp" sherpa-onnx-v1.13.8-osx-arm64-static-no-tts/bin/sherpa-onnx-offline-speaker-diarization
+  mv "$tmp/sherpa-onnx-v1.13.8-osx-arm64-static-no-tts/bin/sherpa-onnx-offline-speaker-diarization" "$model_dir/"
+  rm -rf "$tmp"
 fi
+if [ ! -f "$model_dir/speaker-segmentation.onnx" ]; then
+  tmp=$(mktemp -d)
+  fetch "$sherpa/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2" \
+    24615ee884c897d9d2ba09bb4d30da6bb1b15e685065962db5b02e76e4996488 "$tmp/segmentation.tar.bz2"
+  tar xjf "$tmp/segmentation.tar.bz2" -C "$tmp" sherpa-onnx-pyannote-segmentation-3-0/model.onnx
+  mv "$tmp/sherpa-onnx-pyannote-segmentation-3-0/model.onnx" "$model_dir/speaker-segmentation.onnx"
+  rm -rf "$tmp"
+fi
+fetch "$sherpa/speaker-recongition-models/nemo_en_titanet_small.onnx" \
+  ad4a1802485d8b34c722d2a9d04249662f2ece5d28a7a039063ca22f515a789e "$model_dir/nemo_en_titanet_small.onnx"
 
 ./build.sh
 mkdir -p "$HOME/Applications"
