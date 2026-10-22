@@ -162,7 +162,8 @@ final class Locked<Value> {
 // Runs whisper-cli over `url` with `arguments`, writing JSON to `base`.json, and returns
 // that JSON, or nil when it failed. Waits without holding a thread; the limit is three times
 // the recording's length.
-func runWhisper(_ arguments: [String], on url: URL, base: String, length: TimeInterval) async -> Data? {
+func runWhisper(_ arguments: [String], on url: URL, base: String, length: TimeInterval,
+                purpose: String = "transcribing") async -> Data? {
   guard let whisper = whisperPath else { return nil }
   let process = Process()
   process.executableURL = URL(fileURLWithPath: whisper)
@@ -188,7 +189,7 @@ func runWhisper(_ arguments: [String], on url: URL, base: String, length: TimeIn
   }
   meetingProcesses.with { $0.removeAll { $0 === process } }
   guard status == 0, let data = FileManager.default.contents(atPath: base + ".json") else {
-    log("meeting: whisper-cli failed on \(url.lastPathComponent) (exit \(status.map(String.init) ?? "none"))")
+    log("meeting: whisper-cli failed \(purpose) \(url.lastPathComponent) (exit \(status.map(String.init) ?? "none"))")
     return nil
   }
   return data
@@ -215,7 +216,8 @@ let turnModel = modelDir + "ggml-small.en-tdrz.bin"
 func meetingTurns(_ url: URL, offset: Int = 0, length: TimeInterval) async -> [Int] {
   guard FileManager.default.fileExists(atPath: url.path), FileManager.default.fileExists(atPath: turnModel),
         let data = await runWhisper(["-m", turnModel, "-l", "en", "-tdrz"], on: url,
-                                    base: url.deletingPathExtension().path + "-turns", length: length),
+                                    base: url.deletingPathExtension().path + "-turns", length: length,
+                                    purpose: "finding speaker changes in"),
         let turns = speakerTurns(fromWhisperJSON: data) else { return [] }
   return turns.map { $0 + offset }
 }
