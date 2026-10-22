@@ -5,6 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 model_dir="$HOME/.local/share/voice-type"
 model="$model_dir/ggml-small.en.bin"
+turn_model="$model_dir/ggml-small.en-tdrz.bin"
 label=com.bryanfrds.voice-type
 agent="$HOME/Library/LaunchAgents/$label.plist"
 
@@ -14,6 +15,11 @@ if [ ! -f "$model" ]; then
   mkdir -p "$model_dir"
   curl -fL -o "$model.part" https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin
   mv "$model.part" "$model"
+fi
+# Marks where a new person starts talking in meeting notes recorded in a room.
+if [ ! -f "$turn_model" ]; then
+  curl -fL -o "$turn_model.part" https://huggingface.co/akashmjn/tinydiarize-whisper.cpp/resolve/main/ggml-small.en-tdrz.bin
+  mv "$turn_model.part" "$turn_model"
 fi
 
 ./build.sh

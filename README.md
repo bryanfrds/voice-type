@@ -14,8 +14,8 @@ so the pasted text can differ slightly from what the bubble showed.
 
     ./install.sh
 
-This installs whisper.cpp with Homebrew and downloads the English speech model
-(about 470 MB) if they're missing. Then it builds `~/Applications/VoiceType.app` and
+This installs whisper.cpp with Homebrew and downloads the English speech model and a second
+one for meeting notes (about 470 MB each) if they're missing. Then it builds `~/Applications/VoiceType.app` and
 starts it now and at every login. The first time, macOS asks to let VoiceType use the
 microphone, Speech Recognition, Input Monitoring and Accessibility (System Settings → Privacy & Security). It needs
 Accessibility to see the keys and to paste.
@@ -41,6 +41,10 @@ transcript on this Mac, DeepSeek writes the summary, decisions and action items,
 opens from `~/Documents/Meeting Notes`. The audio is deleted afterwards. **Open Meeting Notes
 folder** in the menu shows all of them.
 
+- **In a room:** everyone is heard through the one mic, so the transcript can't name
+  people, but each time someone new starts talking it starts a new line. A second, smaller
+  English model (`ggml-small.en-tdrz.bin`, which the installer downloads) finds those
+  changes. It works on real speech in English and can miss a change or add one.
 - **Call audio:** the first time, macOS asks for Screen Recording. Without it, only the mic
   is recorded, which still works for a meeting in a room.
 - **Summary:** needs a DeepSeek API key. Put `DEEPSEEK_API_KEY=sk-...` in
