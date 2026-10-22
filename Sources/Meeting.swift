@@ -159,67 +159,92 @@ final class Locked<Value> {
   func with<T>(_ body: (inout Value) -> T) -> T { lock.withLock { body(&value) } }
 }
 
-// Runs whisper-cli over `url` with `arguments`, writing JSON to `base`.json, and returns
-// that JSON, or nil when it failed. Waits without holding a thread; the limit is three times
-// the recording's length.
-func runWhisper(_ arguments: [String], on url: URL, base: String, length: TimeInterval,
-                purpose: String = "transcribing") async -> Data? {
-  guard let whisper = whisperPath else { return nil }
+// Runs a tool on a meeting recording and waits for it without holding a thread, its output
+// going to `output` if given. False when it failed. The limit is three times the
+// recording's length; `purpose` says in the log what it was doing ("transcribing").
+func runTool(_ path: String, _ arguments: [String], output: URL? = nil, on url: URL,
+             length: TimeInterval, purpose: String) async -> Bool {
   let process = Process()
-  process.executableURL = URL(fileURLWithPath: whisper)
-  process.arguments = arguments + ["-f", url.path, "-oj", "-of", base, "-np"]
-  process.standardOutput = FileHandle.nullDevice
+  process.executableURL = URL(fileURLWithPath: path)
+  process.arguments = arguments
+  // A file rather than a pipe, so a long meeting's output can't fill the pipe and stall it.
+  if let output, FileManager.default.createFile(atPath: output.path, contents: nil) {
+    process.standardOutput = (try? FileHandle(forWritingTo: output)) ?? FileHandle.nullDevice
+  } else {
+    process.standardOutput = FileHandle.nullDevice
+  }
   process.standardError = FileHandle.nullDevice
+  let name = URL(fileURLWithPath: path).lastPathComponent
   let limit = max(300, length * 3)
   meetingProcesses.with { $0.append(process) }  // before run, so a quit can't miss it
   let status: Int32? = await withCheckedContinuation { done in
     process.terminationHandler = { done.resume(returning: $0.terminationStatus) }
     do { try process.run() } catch {
-      log("meeting: whisper-cli failed to start: \(error)")
+      log("meeting: \(name) failed to start: \(error)")
       process.terminationHandler = nil
       done.resume(returning: nil)
       return
     }
     DispatchQueue.global().asyncAfter(deadline: .now() + limit) {
       if process.isRunning {
-        log("meeting: whisper-cli took over \(Int(limit))s on \(url.lastPathComponent); stopped it")
+        log("meeting: \(name) took over \(Int(limit))s on \(url.lastPathComponent); stopped it")
         process.terminate()
       }
     }
   }
   meetingProcesses.with { $0.removeAll { $0 === process } }
-  guard status == 0, let data = FileManager.default.contents(atPath: base + ".json") else {
-    log("meeting: whisper-cli failed \(purpose) \(url.lastPathComponent) (exit \(status.map(String.init) ?? "none"))")
-    return nil
+  try? (process.standardOutput as? FileHandle)?.close()
+  guard status == 0 else {
+    log("meeting: \(name) failed \(purpose) \(url.lastPathComponent) (exit \(status.map(String.init) ?? "none"))")
+    return false
   }
-  return data
+  return true
 }
 
 // Whisper over a whole recording, as segments for `speaker` shifted by `offset` ms. Nil when
 // it failed (as opposed to [] for silence), so the audio is kept rather than thrown away.
 func meetingSegments(_ url: URL, speaker: String, offset: Int = 0, length: TimeInterval) async -> [Segment]? {
   guard FileManager.default.fileExists(atPath: url.path) else { return [] }
-  guard let model = modelPath(),
-        let data = await runWhisper(["-m", model, "-l", "auto"], on: url,
-                                    base: url.deletingPathExtension().path, length: length),
-        let found = segments(fromWhisperJSON: data, speaker: speaker) else { return nil }
-  return found.map {
-    Segment(start: $0.start + offset, speaker: $0.speaker, text: $0.text)
+  let base = url.deletingPathExtension().path
+  guard let model = modelPath(), let whisper = whisperPath,
+        await runTool(whisper, ["-m", model, "-l", "auto"] + segmentOptions(for: speaker) + ["-f", url.path, "-oj", "-of", base, "-np"],
+                      on: url, length: length, purpose: "transcribing"),
+        let data = FileManager.default.contents(atPath: base + ".json"),
+        let found = segments(fromWhisperJSON: data, speaker: speaker) else {
+    log("meeting: no transcript for \(url.lastPathComponent)")
+    return nil
   }
+  return shifted(found, by: offset)
 }
 
-// The English model trained to notice a new person talking (tinydiarize), if downloaded.
-let turnModel = modelDir + "ggml-small.en-tdrz.bin"
+// sherpa-onnx's speaker diarization and its two models, which install.sh puts beside the
+// speech models: one finds where someone is speaking, the other fingerprints each voice.
+let diarizer = modelDir + "sherpa-onnx-offline-speaker-diarization"
+let voiceFinder = modelDir + "speaker-segmentation.onnx"
+let voicePrinter = modelDir + "nemo_en_titanet_small.onnx"
+// How alike two voices must be to count as one person. 0.85 told the people apart in all
+// four of sherpa-onnx's test recordings (two to four people, English and Chinese).
+let sameVoice = "0.85"
 
-// When a new person starts talking in a recording, in ms shifted by `offset`. Only a help
-// for reading the transcript, so a missing model or a failure gives [] and loses nothing.
-func meetingTurns(_ url: URL, offset: Int = 0, length: TimeInterval) async -> [Int] {
-  guard FileManager.default.fileExists(atPath: url.path), FileManager.default.fileExists(atPath: turnModel),
-        let data = await runWhisper(["-m", turnModel, "-l", "en", "-tdrz"], on: url,
-                                    base: url.deletingPathExtension().path + "-turns", length: length,
-                                    purpose: "finding speaker changes in"),
-        let turns = speakerTurns(fromWhisperJSON: data) else { return [] }
-  return turns.map { $0 + offset }
+// Who was speaking when in a recording, shifted by `offset` ms. Only a help for reading the
+// transcript, so a missing tool or a failure gives [] and loses nothing.
+func meetingVoices(_ url: URL, offset: Int = 0, length: TimeInterval) async -> [VoiceSpan] {
+  let files = [diarizer, voiceFinder, voicePrinter]
+  guard FileManager.default.fileExists(atPath: url.path),
+        files.allSatisfy({ FileManager.default.fileExists(atPath: $0) }) else { return [] }
+  // The diarizer only takes 16 kHz mono; the mic records at whatever the device gives.
+  let base = url.deletingPathExtension().path
+  let small = URL(fileURLWithPath: base + "-16k.wav")
+  let output = URL(fileURLWithPath: base + "-voices.txt")
+  guard await runTool("/usr/bin/afconvert", ["-f", "WAVE", "-d", "LEI16@16000", "-c", "1", url.path, small.path],
+                      on: url, length: length, purpose: "converting"),
+        await runTool(diarizer, ["--segmentation.pyannote-model=" + voiceFinder, "--embedding.model=" + voicePrinter,
+                                 "--clustering.cluster-threshold=" + sameVoice, small.path],
+                      output: output, on: url, length: length, purpose: "telling voices apart in"),
+        let text = try? String(contentsOf: output, encoding: .utf8) else { return [] }
+  return voiceSpans(fromDiarization: text).map {
+    VoiceSpan(start: $0.start + offset, end: $0.end + offset, speaker: $0.speaker)
+  }
 }
 
 // Asks DeepSeek for the summary. Returns it, or nil with the reason to show in the note.
@@ -287,13 +312,15 @@ func writeNotes(_ recording: MeetingRecording, progress: @escaping (String) asyn
   // side failed, that can't be told, so the mic stays "You".)
   let micSpeaker = call?.isEmpty == true ? "Room" : "You"
   var mic: [Segment] = []
+  var numbers: [String: Int] = [:]  // speaker numbers, kept across the mic files
   var micFailed = false
   for (i, part) in parts.enumerated() {
     await progress(transcribingStep(i + 2, of: steps))
     if var found = await meetingSegments(part.url, speaker: micSpeaker, offset: part.offset, length: length) {
       if micSpeaker == "Room", !found.isEmpty {
-        await progress("Finding who spoke when…")
-        found = markingTurns(found, at: await meetingTurns(part.url, offset: part.offset, length: length))
+        await progress("Telling voices apart…")
+        let voices = await meetingVoices(part.url, offset: part.offset, length: length)
+        found = labellingPart(found, voices: voices, part: i, numbers: &numbers)
       }
       mic += found
     } else {
