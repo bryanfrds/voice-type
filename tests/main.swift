@@ -155,8 +155,9 @@ let room = [Segment(start: 0, speaker: "Room", text: "Okay Houston, we've had a 
             Segment(start: 4700, speaker: "Room", text: "Say again, please."),
             Segment(start: 6900, speaker: "Room", text: "We've had a problem.")]
 let marked = markingTurns(room, at: [4800, 6400, 20_000])
-check("each turn marks the segment starting nearest it; one with nothing near is left out",
-      marked.map(\.turn), [false, true, true])
+check("each turn marks the segment starting nearest it", marked.map(\.turn), [false, true, true])
+check("a turn 1.6 s from the nearest segment is left out", markingTurns(room, at: [8500]).map(\.turn), [false, false, false])
+check("a turn 1.5 s from it still counts", markingTurns(room, at: [8400]).map(\.turn), [false, false, true])
 check("a room's speaker changes start new lines; the rest of a turn joins its line",
       transcript([markingTurns(room, at: [4800])]),
       "[0:00] Room: Okay Houston, we've had a problem.\n[0:04] Room: Say again, please. We've had a problem.")
