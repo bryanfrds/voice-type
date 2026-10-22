@@ -3,11 +3,13 @@ import Foundation
 // Meeting notes, the parts that don't touch audio or the network: reading Whisper's
 // segments, merging the two sides of a call into one transcript, and the note itself.
 
-// One stretch of speech, in milliseconds from the start of the recording.
+// One stretch of speech, in milliseconds from the start of the recording. `turn` marks
+// where a new person starts talking in a room, where everyone shares one speaker label.
 struct Segment: Equatable {
   let start: Int
   let speaker: String
   let text: String
+  var turn = false
 }
 
 // The segments in whisper-cli's JSON output (-oj): {"transcription": [{"offsets":
@@ -26,13 +28,39 @@ func segments(fromWhisperJSON data: Data, speaker: String) -> [Segment]? {
   }
 }
 
-// Both sides in time order, with a speaker's consecutive segments joined into one turn.
+// When a different person starts talking, in ms, from whisper-cli's JSON run with -tdrz:
+// the start of each segment after one marked "speaker_turn_next". Nil when it can't be read.
+func speakerTurns(fromWhisperJSON data: Data) -> [Int]? {
+  guard let root = try? JSONSerialization.jsonObject(with: Data(String(decoding: data, as: UTF8.self).utf8))
+          as? [String: Any],
+        let items = root["transcription"] as? [[String: Any]] else { return nil }
+  let starts = items.map { (($0["offsets"] as? [String: Any])?["from"] as? Int) }
+  return items.indices.dropLast().compactMap { i in
+    items[i]["speaker_turn_next"] as? Bool == true ? starts[i + 1] : nil
+  }
+}
+
+// Marks the segment starting nearest each turn as a new person, if one starts within
+// `within` ms of it. The turns come from a second, smaller model whose segments don't line
+// up exactly with the main model's, and a turn with no segment near it is left out.
+func markingTurns(_ segments: [Segment], at turns: [Int], within: Int = 1500) -> [Segment] {
+  var marked = segments
+  for turn in turns {
+    guard let nearest = marked.indices.min(by: { abs(marked[$0].start - turn) < abs(marked[$1].start - turn) }),
+          abs(marked[nearest].start - turn) <= within else { continue }
+    marked[nearest].turn = true
+  }
+  return marked
+}
+
+// Both sides in time order, with a speaker's consecutive segments joined into one turn,
+// until a segment marks a new person.
 func transcript(_ sides: [[Segment]]) -> String {
   let ordered = sides.flatMap { $0 }.enumerated()
     .sorted { ($0.element.start, $0.offset) < ($1.element.start, $1.offset) }.map(\.element)
   var turns: [(speaker: String, start: Int, text: String)] = []
   for segment in ordered {
-    if let last = turns.last, last.speaker == segment.speaker {
+    if let last = turns.last, last.speaker == segment.speaker, !segment.turn {
       turns[turns.count - 1].text = joined(last.text, segment.text)
     } else {
       turns.append((segment.speaker, segment.start, segment.text))
@@ -67,8 +95,9 @@ func noteStem(for date: Date) -> String {
 let summaryInstructions = """
   You write meeting notes from a transcript. On a call, "You" is the person who recorded the \
   meeting and "Others" is everyone heard through the call. "Room" means one microphone heard \
-  everyone in a room, so it can't tell who spoke: name an owner for an action item only when \
-  the transcript says who it is, else write "someone". The transcript comes from speech \
+  everyone in a room, so it can't tell who spoke; each new "Room" line is usually a different \
+  person from the line before (detected automatically, so sometimes wrong). Name an owner for \
+  an action item only when the transcript says who it is, else write "someone". The transcript comes from speech \
   recognition, so fix obvious mishearings from context, and never invent facts, names, dates \
   or numbers that aren't in it.
 
