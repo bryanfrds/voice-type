@@ -44,16 +44,18 @@ func voiceSpans(fromDiarization output: String) -> [VoiceSpan] {
     let parts = line.split(separator: " ")
     guard parts.count == 4, parts[1] == "--", parts[3].hasPrefix("speaker_"),
           let start = Double(parts[0]), let end = Double(parts[2]), end > start else { return nil }
-    return VoiceSpan(start: Int(start * 1000), end: Int(end * 1000), speaker: String(parts[3]))
+    return VoiceSpan(start: Int((start * 1000).rounded()), end: Int((end * 1000).rounded()), speaker: String(parts[3]))
   }
 }
 
-// Gives each segment the voice heard most during it, as "Speaker 1", "Speaker 2"... in the
+// Gives each segment of one recording the voice heard most during it (added up over all its
+// spans; a tie goes to the voice whose name sorts first), as "Speaker 1", "Speaker 2"... in the
 // order people first speak. A segment no voice overlaps takes the nearest voice. With no
 // spans at all (the tool missing or failed), the segments are left as they were.
-func labellingSpeakers(_ segments: [Segment], spans: [VoiceSpan]) -> [Segment] {
+// `numbers` carries the numbering from one recording to the next; their spans' speaker names
+// must differ, since each recording's voices are told apart on their own.
+func labellingSpeakers(_ segments: [Segment], spans: [VoiceSpan], numbers: inout [String: Int]) -> [Segment] {
   guard !spans.isEmpty else { return segments }
-  var numbers: [String: Int] = [:]
   return segments.map { segment in
     let end = max(segment.end ?? segment.start, segment.start + 1)
     let heard = Dictionary(grouping: spans, by: \.speaker).mapValues { voice in
@@ -65,6 +67,11 @@ func labellingSpeakers(_ segments: [Segment], spans: [VoiceSpan]) -> [Segment] {
     numbers[voice] = number
     return Segment(start: segment.start, speaker: "Speaker \(number)", text: segment.text, end: segment.end)
   }
+}
+
+func labellingSpeakers(_ segments: [Segment], spans: [VoiceSpan]) -> [Segment] {
+  var numbers: [String: Int] = [:]
+  return labellingSpeakers(segments, spans: spans, numbers: &numbers)
 }
 
 // How far a span is from start...end, in ms; 0 when they overlap.

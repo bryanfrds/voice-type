@@ -169,7 +169,7 @@ func runTool(_ path: String, _ arguments: [String], output: URL? = nil, on url: 
   process.arguments = arguments
   // A file rather than a pipe, so a long meeting's output can't fill the pipe and stall it.
   if let output, FileManager.default.createFile(atPath: output.path, contents: nil) {
-    process.standardOutput = try? FileHandle(forWritingTo: output)
+    process.standardOutput = (try? FileHandle(forWritingTo: output)) ?? FileHandle.nullDevice
   } else {
     process.standardOutput = FileHandle.nullDevice
   }
@@ -204,13 +204,14 @@ func runTool(_ path: String, _ arguments: [String], output: URL? = nil, on url: 
 // Whisper over a whole recording, as segments for `speaker` shifted by `offset` ms. Nil when
 // it failed (as opposed to [] for silence), so the audio is kept rather than thrown away.
 func meetingSegments(_ url: URL, speaker: String, offset: Int = 0, length: TimeInterval) async -> [Segment]? {
+  // In a room, segments of at most 50 characters, cut between words: short enough that one
+  // rarely holds two people, so each can be given to whoever was speaking. A speaker's run is
+  // joined again in the transcript. A call's sides are already apart, so they're left whole.
+  let short = speaker == "Room" ? ["-ml", "50", "-sow"] : []
   guard FileManager.default.fileExists(atPath: url.path) else { return [] }
   let base = url.deletingPathExtension().path
-  // Segments of at most 50 characters, cut between words: short enough that one rarely holds
-  // two people, so each can be given to whoever was speaking. A speaker's run is joined again.
   guard let model = modelPath(), let whisper = whisperPath,
-        await runTool(whisper, ["-m", model, "-l", "auto", "-ml", "50", "-sow",
-                                "-f", url.path, "-oj", "-of", base, "-np"],
+        await runTool(whisper, ["-m", model, "-l", "auto"] + short + ["-f", url.path, "-oj", "-of", base, "-np"],
                       on: url, length: length, purpose: "transcribing"),
         let data = FileManager.default.contents(atPath: base + ".json"),
         let found = segments(fromWhisperJSON: data, speaker: speaker) else {
@@ -218,7 +219,7 @@ func meetingSegments(_ url: URL, speaker: String, offset: Int = 0, length: TimeI
     return nil
   }
   return found.map {
-    Segment(start: $0.start + offset, speaker: $0.speaker, text: $0.text)
+    Segment(start: $0.start + offset, speaker: $0.speaker, text: $0.text, end: $0.end.map { $0 + offset })
   }
 }
 
@@ -317,18 +318,19 @@ func writeNotes(_ recording: MeetingRecording, progress: @escaping (String) asyn
   // side failed, that can't be told, so the mic stays "You".)
   let micSpeaker = call?.isEmpty == true ? "Room" : "You"
   var mic: [Segment] = []
-  var voices: [VoiceSpan] = []
+  var numbers: [String: Int] = [:]  // speaker numbers, kept across the mic files
   var micFailed = false
   for (i, part) in parts.enumerated() {
     await progress(transcribingStep(i + 2, of: steps))
-    if let found = await meetingSegments(part.url, speaker: micSpeaker, offset: part.offset, length: length) {
+    if var found = await meetingSegments(part.url, speaker: micSpeaker, offset: part.offset, length: length) {
       if micSpeaker == "Room", !found.isEmpty {
         await progress("Telling voices apart…")
-        // Each file's voices are told apart on their own, so after a mic change the same
-        // people get new numbers.
-        voices += await meetingVoices(part.url, offset: part.offset, length: length).map {
+        // Each file's voices are told apart on their own, and only label that file's words,
+        // so after a mic change the same people get new numbers.
+        let voices = await meetingVoices(part.url, offset: part.offset, length: length).map {
           VoiceSpan(start: $0.start, end: $0.end, speaker: "\(i)-\($0.speaker)")
         }
+        found = labellingSpeakers(found, spans: voices, numbers: &numbers)
       }
       mic += found
     } else {
@@ -336,7 +338,7 @@ func writeNotes(_ recording: MeetingRecording, progress: @escaping (String) asyn
     }
   }
   let failed = call == nil || micFailed
-  let text = transcript([labellingSpeakers(mic, spans: voices), call ?? []])
+  let text = transcript([mic, call ?? []])
   let (summaryText, reason): (String?, String?)
   if text.isEmpty {
     (summaryText, reason) = (nil, failed ? "the transcription failed" : "nothing was heard")

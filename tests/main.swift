@@ -141,6 +141,8 @@ check("both sides merge in time order, a speaker's run joined",
 check("nothing heard: empty transcript", transcript([[], []]), "")
 
 check("a segment keeps its end time", you.first?.end, 2000)
+check("span times are rounded to the ms, not cut", voiceSpans(fromDiarization: "1.583 -- 3.4069 speaker_00"),
+      [VoiceSpan(start: 1583, end: 3407, speaker: "speaker_00")])
 
 let diarization = """
   OfflineSpeakerDiarizationConfig(segmentation=..., min_duration_on=0.3)
@@ -168,6 +170,27 @@ check("a segment no voice overlaps takes the nearest one (0.1 s away, not 0.4 s)
       labellingSpeakers([room[0], Segment(start: 6300, speaker: "Room", text: "Hm.", end: 6500)], spans: spans)
         .map(\.speaker), ["Speaker 1", "Speaker 2"])
 check("with no voices found, the segments stay as they were", labellingSpeakers(room, spans: []), room)
+let three = [VoiceSpan(start: 0, end: 800, speaker: "a"), VoiceSpan(start: 1000, end: 1800, speaker: "a"),
+             VoiceSpan(start: 2000, end: 3000, speaker: "b"), VoiceSpan(start: 5000, end: 6000, speaker: "b")]
+check("a voice's time is added up over its spans (1.6 s in two beats 1 s in one)",
+      labellingSpeakers([Segment(start: 5000, speaker: "Room", text: "B first.", end: 6000),
+                         Segment(start: 0, speaker: "Room", text: "Mostly A.", end: 3000)], spans: three).map(\.speaker),
+      ["Speaker 1", "Speaker 2"])
+let tie = [VoiceSpan(start: 0, end: 1000, speaker: "speaker_01"), VoiceSpan(start: 1000, end: 2000, speaker: "speaker_00"),
+           VoiceSpan(start: 3000, end: 4000, speaker: "speaker_01")]
+check("a tie goes to the voice whose name sorts first",
+      labellingSpeakers([Segment(start: 3000, speaker: "Room", text: "One.", end: 4000),
+                         Segment(start: 0, speaker: "Room", text: "Even.", end: 2000)], spans: tie).map(\.speaker),
+      ["Speaker 1", "Speaker 2"])
+var shared: [String: Int] = [:]
+let partOne = labellingSpeakers([room[0]], spans: [VoiceSpan(start: 0, end: 4000, speaker: "0-speaker_00")], numbers: &shared)
+let partTwo = labellingSpeakers([Segment(start: 9000, speaker: "Room", text: "After the mic changed.", end: 9500)],
+                                spans: [VoiceSpan(start: 9000, end: 9500, speaker: "1-speaker_00")], numbers: &shared)
+let partThree = labellingSpeakers([Segment(start: 12000, speaker: "Room", text: "Nobody told apart.", end: 12500)],
+                                  spans: [], numbers: &shared)
+check("numbering carries on across mic files, a new file's voices getting new numbers",
+      (partOne + partTwo).map(\.speaker), ["Speaker 1", "Speaker 2"])
+check("a mic file with no voices found stays Room, not someone from another file", partThree.map(\.speaker), ["Room"])
 check("numbered speakers each get their own lines in the transcript",
       transcript([labellingSpeakers(room, spans: spans)]),
       "[0:00] Speaker 1: Okay Houston, we've had a problem.\n[0:04] Speaker 2: Say again, please.\n[0:06] Speaker 1: We've had a problem.")
