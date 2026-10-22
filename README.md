@@ -42,9 +42,10 @@ opens from `~/Documents/Meeting Notes`. The audio is deleted afterwards. **Open 
 folder** in the menu shows all of them.
 
 - **In a room:** everyone is heard through the one mic, so the transcript can't name
-  people, but each time someone new starts talking it starts a new line. A second, smaller
-  English model (`ggml-small.en-tdrz.bin`, which the installer downloads) finds those
-  changes. It works on real speech in English and can miss a change or add one.
+  people, but each time someone new starts talking it starts a new line. A second English
+  model (`ggml-small.en-tdrz.bin`, which the installer downloads) finds those
+  changes. It works on real speech in English and can miss a change or add one. If you
+  installed before this, run `./install.sh` again to get it.
 - **Call audio:** the first time, macOS asks for Screen Recording. Without it, only the mic
   is recorded, which still works for a meeting in a room.
 - **Summary:** needs a DeepSeek API key. Put `DEEPSEEK_API_KEY=sk-...` in

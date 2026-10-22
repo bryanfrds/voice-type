@@ -41,7 +41,7 @@ func speakerTurns(fromWhisperJSON data: Data) -> [Int]? {
 }
 
 // Marks the segment starting nearest each turn as a new person, if one starts within
-// `within` ms of it. The turns come from a second, smaller model whose segments don't line
+// `within` ms of it. The turns come from a second model whose segments don't line
 // up exactly with the main model's, and a turn with no segment near it is left out.
 func markingTurns(_ segments: [Segment], at turns: [Int], within: Int = 1500) -> [Segment] {
   var marked = segments
