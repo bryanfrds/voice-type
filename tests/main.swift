@@ -140,27 +140,37 @@ check("both sides merge in time order, a speaker's run joined",
       "[0:00] You: Shall we start?\n[0:03] Others: Yes. Go ahead.\n[0:09] You: Budget is RM5,000.")
 check("nothing heard: empty transcript", transcript([[], []]), "")
 
-let turnJSON = Data("""
-  {"transcription": [
-    {"offsets": {"from": 0, "to": 3800}, "text": " Okay Houston, we've had a problem.", "speaker_turn_next": true},
-    {"offsets": {"from": 4800, "to": 6200}, "text": " Say again, please.", "speaker_turn_next": false},
-    {"offsets": {"from": 6900, "to": 8300}, "text": " We've had a problem.", "speaker_turn_next": true}
-  ]}
-  """.utf8)
-check("a turn is where the segment after a marked one starts; a last mark has nothing after it",
-      speakerTurns(fromWhisperJSON: turnJSON), [4800])
-check("output with no turn marks has no turns", speakerTurns(fromWhisperJSON: whisperJSON), [])
-check("unreadable turn output is nil", speakerTurns(fromWhisperJSON: Data("nope".utf8)), nil)
-let room = [Segment(start: 0, speaker: "Room", text: "Okay Houston, we've had a problem."),
-            Segment(start: 4700, speaker: "Room", text: "Say again, please."),
-            Segment(start: 6900, speaker: "Room", text: "We've had a problem.")]
-let marked = markingTurns(room, at: [4800, 6400, 20_000])
-check("each turn marks the segment starting nearest it", marked.map(\.turn), [false, true, true])
-check("a turn 1.6 s from the nearest segment is left out", markingTurns(room, at: [8500]).map(\.turn), [false, false, false])
-check("a turn 1.5 s from it still counts", markingTurns(room, at: [8400]).map(\.turn), [false, false, true])
-check("a room's speaker changes start new lines; the rest of a turn joins its line",
-      transcript([markingTurns(room, at: [4800])]),
-      "[0:00] Room: Okay Houston, we've had a problem.\n[0:04] Room: Say again, please. We've had a problem.")
+check("a segment keeps its end time", you.first?.end, 2000)
+
+let diarization = """
+  OfflineSpeakerDiarizationConfig(segmentation=..., min_duration_on=0.3)
+  Started
+  progress 100.00%
+  0.000 -- 4.500 speaker_01
+  4.800 -- 6.200 speaker_00
+  6.900 -- 8.300 speaker_01
+  9.000 -- 9.000 speaker_02
+  Elapsed seconds: 0.735 s
+  """
+let spans = voiceSpans(fromDiarization: diarization)
+check("voice spans are read in ms; settings, progress and empty spans are skipped",
+      spans, [VoiceSpan(start: 0, end: 4500, speaker: "speaker_01"), VoiceSpan(start: 4800, end: 6200, speaker: "speaker_00"),
+              VoiceSpan(start: 6900, end: 8300, speaker: "speaker_01")])
+let room = [Segment(start: 0, speaker: "Room", text: "Okay Houston, we've had a problem.", end: 3800),
+            Segment(start: 4700, speaker: "Room", text: "Say again, please.", end: 6300),
+            Segment(start: 6900, speaker: "Room", text: "We've had a problem.", end: 8300)]
+check("speakers are numbered in the order they first talk, and keep their number",
+      labellingSpeakers(room, spans: spans).map(\.speaker), ["Speaker 1", "Speaker 2", "Speaker 1"])
+check("a segment takes the voice heard most during it (0.5 s of one, 1.2 s of two)",
+      labellingSpeakers([room[0], Segment(start: 4000, speaker: "Room", text: "Mostly two.", end: 6000)], spans: spans)
+        .map(\.speaker), ["Speaker 1", "Speaker 2"])
+check("a segment no voice overlaps takes the nearest one (0.1 s away, not 0.4 s)",
+      labellingSpeakers([room[0], Segment(start: 6300, speaker: "Room", text: "Hm.", end: 6500)], spans: spans)
+        .map(\.speaker), ["Speaker 1", "Speaker 2"])
+check("with no voices found, the segments stay as they were", labellingSpeakers(room, spans: []), room)
+check("numbered speakers each get their own lines in the transcript",
+      transcript([labellingSpeakers(room, spans: spans)]),
+      "[0:00] Speaker 1: Okay Houston, we've had a problem.\n[0:04] Speaker 2: Say again, please.\n[0:06] Speaker 1: We've had a problem.")
 check("minutes and seconds", clock(754_000), "12:34")
 check("hours when past an hour", clock(3_723_000), "1:02:03")
 var utc = Calendar(identifier: .gregorian)

@@ -3,13 +3,13 @@ import Foundation
 // Meeting notes, the parts that don't touch audio or the network: reading Whisper's
 // segments, merging the two sides of a call into one transcript, and the note itself.
 
-// One stretch of speech, in milliseconds from the start of the recording. `turn` marks
-// where a new person starts talking in a room, where everyone shares one speaker label.
+// One stretch of speech, in milliseconds from the start of the recording. `end` is only
+// needed to work out who was speaking in a room.
 struct Segment: Equatable {
   let start: Int
   let speaker: String
   let text: String
-  var turn = false
+  var end: Int? = nil
 }
 
 // The segments in whisper-cli's JSON output (-oj): {"transcription": [{"offsets":
@@ -23,44 +23,62 @@ func segments(fromWhisperJSON data: Data, speaker: String) -> [Segment]? {
         let items = root["transcription"] as? [[String: Any]] else { return nil }
   return items.compactMap { item in
     let text = clean(item["text"] as? String ?? "")
-    guard !text.isEmpty, let start = (item["offsets"] as? [String: Any])?["from"] as? Int else { return nil }
-    return Segment(start: start, speaker: speaker, text: text)
+    let offsets = item["offsets"] as? [String: Any]
+    guard !text.isEmpty, let start = offsets?["from"] as? Int else { return nil }
+    return Segment(start: start, speaker: speaker, text: text, end: offsets?["to"] as? Int)
   }
 }
 
-// When a different person starts talking, in ms, from whisper-cli's JSON run with -tdrz:
-// the start of each segment after one marked "speaker_turn_next". Nil when it can't be read.
-func speakerTurns(fromWhisperJSON data: Data) -> [Int]? {
-  guard let root = try? JSONSerialization.jsonObject(with: Data(String(decoding: data, as: UTF8.self).utf8))
-          as? [String: Any],
-        let items = root["transcription"] as? [[String: Any]] else { return nil }
-  let starts = items.map { (($0["offsets"] as? [String: Any])?["from"] as? Int) }
-  return items.indices.dropLast().compactMap { i in
-    items[i]["speaker_turn_next"] as? Bool == true ? starts[i + 1] : nil
+// A stretch of time one voice was heard, from sherpa-onnx's speaker diarization. `speaker`
+// tells voices apart within one recording, and means nothing across recordings.
+struct VoiceSpan: Equatable {
+  let start: Int
+  let end: Int
+  let speaker: String
+}
+
+// sherpa-onnx-offline-speaker-diarization's output: a "1.583 -- 3.406 speaker_00" line per
+// span, in seconds. Other lines (its settings and progress) are skipped.
+func voiceSpans(fromDiarization output: String) -> [VoiceSpan] {
+  output.split(whereSeparator: \.isNewline).compactMap { line in
+    let parts = line.split(separator: " ")
+    guard parts.count == 4, parts[1] == "--", parts[3].hasPrefix("speaker_"),
+          let start = Double(parts[0]), let end = Double(parts[2]), end > start else { return nil }
+    return VoiceSpan(start: Int(start * 1000), end: Int(end * 1000), speaker: String(parts[3]))
   }
 }
 
-// Marks the segment starting nearest each turn as a new person, if one starts within
-// `within` ms of it. The turns come from a second model whose segments don't line
-// up exactly with the main model's, and a turn with no segment near it is left out.
-func markingTurns(_ segments: [Segment], at turns: [Int], within: Int = 1500) -> [Segment] {
-  var marked = segments
-  for turn in turns {
-    guard let nearest = marked.indices.min(by: { abs(marked[$0].start - turn) < abs(marked[$1].start - turn) }),
-          abs(marked[nearest].start - turn) <= within else { continue }
-    marked[nearest].turn = true
+// Gives each segment the voice heard most during it, as "Speaker 1", "Speaker 2"... in the
+// order people first speak. A segment no voice overlaps takes the nearest voice. With no
+// spans at all (the tool missing or failed), the segments are left as they were.
+func labellingSpeakers(_ segments: [Segment], spans: [VoiceSpan]) -> [Segment] {
+  guard !spans.isEmpty else { return segments }
+  var numbers: [String: Int] = [:]
+  return segments.map { segment in
+    let end = max(segment.end ?? segment.start, segment.start + 1)
+    let heard = Dictionary(grouping: spans, by: \.speaker).mapValues { voice in
+      voice.reduce(0) { $0 + max(0, min($1.end, end) - max($1.start, segment.start)) }
+    }
+    let voice = heard.filter { $0.value > 0 }.max { ($0.value, $1.key) < ($1.value, $0.key) }?.key
+      ?? spans.min { distance($0, segment.start, end) < distance($1, segment.start, end) }!.speaker
+    let number = numbers[voice] ?? numbers.count + 1
+    numbers[voice] = number
+    return Segment(start: segment.start, speaker: "Speaker \(number)", text: segment.text, end: segment.end)
   }
-  return marked
 }
 
-// Both sides in time order, with a speaker's consecutive segments joined into one turn,
-// until a segment marks a new person.
+// How far a span is from start...end, in ms; 0 when they overlap.
+private func distance(_ span: VoiceSpan, _ start: Int, _ end: Int) -> Int {
+  max(0, span.start - end, start - span.end)
+}
+
+// Both sides in time order, with a speaker's consecutive segments joined into one turn.
 func transcript(_ sides: [[Segment]]) -> String {
   let ordered = sides.flatMap { $0 }.enumerated()
     .sorted { ($0.element.start, $0.offset) < ($1.element.start, $1.offset) }.map(\.element)
   var turns: [(speaker: String, start: Int, text: String)] = []
   for segment in ordered {
-    if let last = turns.last, last.speaker == segment.speaker, !segment.turn {
+    if let last = turns.last, last.speaker == segment.speaker {
       turns[turns.count - 1].text = joined(last.text, segment.text)
     } else {
       turns.append((segment.speaker, segment.start, segment.text))
@@ -94,11 +112,12 @@ func noteStem(for date: Date) -> String {
 
 let summaryInstructions = """
   You write meeting notes from a transcript. On a call, "You" is the person who recorded the \
-  meeting and "Others" is everyone heard through the call. "Room" means one microphone heard \
-  everyone in a room, so it can't tell who spoke; each new "Room" line is usually a different \
-  person from the line before (detected automatically, so sometimes wrong). Name an owner for \
-  an action item only when the transcript says who it is, else write "someone". The transcript comes from speech \
-  recognition, so fix obvious mishearings from context, and never invent facts, names, dates \
+  meeting and "Others" is everyone heard through the call. In a room, one microphone heard \
+  everyone: "Speaker 1", "Speaker 2" and so on are people told apart by their voices, \
+  automatically, so two people can be mixed up, and "Room" means they couldn't be told apart. \
+  Name an owner for an action item only when the transcript says who it is, else use their \
+  speaker label, or "someone" for "Room". The transcript comes from speech recognition, so \
+  fix obvious mishearings from context, and never invent facts, names, dates \
   or numbers that aren't in it.
 
   Reply in Markdown with exactly these sections, in this order:
