@@ -18,13 +18,16 @@ fi
 # Tells people apart by voice in meeting notes recorded in a room: sherpa-onnx's speaker
 # diarization tool and its two models, each checked against the file that was tested.
 sherpa=https://github.com/k2-fsa/sherpa-onnx/releases/download
+tmp=
+trap 'rm -rf "${tmp:-}"' EXIT
 fetch() {  # url, sha256, destination
   [ -f "$3" ] && return
   curl -fL -o "$3.part" "$1"
   echo "$2  $3.part" | shasum -a 256 -c --quiet
   mv "$3.part" "$3"
 }
-if [ ! -x "$model_dir/sherpa-onnx-offline-speaker-diarization" ]; then
+# Its tool is built for Apple silicon only; without it, a room's speakers are all "Room".
+if [ "$(uname -m)" = arm64 ] && [ ! -x "$model_dir/sherpa-onnx-offline-speaker-diarization" ]; then
   tmp=$(mktemp -d)
   fetch "$sherpa/v1.13.8/sherpa-onnx-v1.13.8-osx-arm64-static-no-tts.tar.bz2" \
     1038a379fff5365b684e05cbbb9ab3577c1a2f6b1736a4d53a6746860d7eddd4 "$tmp/sherpa.tar.bz2"
@@ -42,6 +45,7 @@ if [ ! -f "$model_dir/speaker-segmentation.onnx" ]; then
 fi
 fetch "$sherpa/speaker-recongition-models/nemo_en_titanet_small.onnx" \
   ad4a1802485d8b34c722d2a9d04249662f2ece5d28a7a039063ca22f515a789e "$model_dir/nemo_en_titanet_small.onnx"
+rm -f "$model_dir/ggml-small.en-tdrz.bin"  # the speaker-change model this replaced
 
 ./build.sh
 mkdir -p "$HOME/Applications"
