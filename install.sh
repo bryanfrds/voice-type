@@ -35,7 +35,7 @@ if [ "$(uname -m)" = arm64 ] && [ ! -x "$model_dir/sherpa-onnx-offline-speaker-d
   mv "$tmp/sherpa-onnx-v1.13.8-osx-arm64-static-no-tts/bin/sherpa-onnx-offline-speaker-diarization" "$model_dir/"
   rm -rf "$tmp"
 fi
-if [ ! -f "$model_dir/speaker-segmentation.onnx" ]; then
+if [ "$(uname -m)" = arm64 ] && [ ! -f "$model_dir/speaker-segmentation.onnx" ]; then
   tmp=$(mktemp -d)
   fetch "$sherpa/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2" \
     24615ee884c897d9d2ba09bb4d30da6bb1b15e685065962db5b02e76e4996488 "$tmp/segmentation.tar.bz2"
@@ -43,8 +43,10 @@ if [ ! -f "$model_dir/speaker-segmentation.onnx" ]; then
   mv "$tmp/sherpa-onnx-pyannote-segmentation-3-0/model.onnx" "$model_dir/speaker-segmentation.onnx"
   rm -rf "$tmp"
 fi
-fetch "$sherpa/speaker-recongition-models/nemo_en_titanet_small.onnx" \
-  ad4a1802485d8b34c722d2a9d04249662f2ece5d28a7a039063ca22f515a789e "$model_dir/nemo_en_titanet_small.onnx"
+if [ "$(uname -m)" = arm64 ]; then
+  fetch "$sherpa/speaker-recongition-models/nemo_en_titanet_small.onnx" \
+    ad4a1802485d8b34c722d2a9d04249662f2ece5d28a7a039063ca22f515a789e "$model_dir/nemo_en_titanet_small.onnx"
+fi
 rm -f "$model_dir/ggml-small.en-tdrz.bin"  # the speaker-change model this replaced
 
 ./build.sh
