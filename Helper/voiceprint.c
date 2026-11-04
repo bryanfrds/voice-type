@@ -41,6 +41,10 @@ int main(int argc, char *argv[]) {
     return 1;
   }
   const float *print = SherpaOnnxSpeakerEmbeddingExtractorComputeEmbedding(extractor, stream);
+  if (!print) {
+    fprintf(stderr, "no voiceprint\n");
+    return 1;
+  }
   int32_t dim = SherpaOnnxSpeakerEmbeddingExtractorDim(extractor);
   for (int32_t i = 0; i < dim; i++) printf(i ? " %.6g" : "%.6g", print[i]);
   printf("\n");

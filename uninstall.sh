@@ -17,7 +17,7 @@ rm -rf "$HOME/Applications/VoiceType.app"
 ./remove-cert.sh || echo "The signing certificate may still be in your login keychain."
 if [ "${1:-}" = "--models" ]; then
   rm -rf "$HOME/.local/share/voice-type"
-  echo "VoiceType and its speech models removed."
+  echo "VoiceType, its speech models and remembered voices removed."
 else
-  echo "VoiceType removed. The models are still in ~/.local/share/voice-type (run with --models to delete them)."
+  echo "VoiceType removed. The models and remembered voices are still in ~/.local/share/voice-type (run with --models to delete them)."
 fi

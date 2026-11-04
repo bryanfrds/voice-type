@@ -52,6 +52,7 @@ folder** in the menu shows all of them.
   meetings say "Zach" instead of "Speaker 2" (the window then only appears when someone new
   talks). Voiceprints stay on this Mac in `~/.local/share/voice-type/voices.json`;
   **Forget remembered voices** in the menu deletes them all. Ask people before saving theirs.
+  Names of people it knows go to DeepSeek with the transcript, in place of "Speaker 2".
 - **Call audio:** the first time, macOS asks for Screen Recording. Without it, only the mic
   is recorded, which still works for a meeting in a room.
 - **Summary:** needs a DeepSeek API key. Put `DEEPSEEK_API_KEY=sk-...` in

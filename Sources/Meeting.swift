@@ -242,6 +242,8 @@ func storeSavedVoices(_ voices: [SavedVoice]) {
       if FileManager.default.fileExists(atPath: savedVoicesURL.path) { try FileManager.default.removeItem(at: savedVoicesURL) }
     } else {
       try JSONEncoder().encode(voices).write(to: savedVoicesURL, options: .atomic)
+      // Owner only: other accounts on this Mac share the "staff" group.
+      try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: savedVoicesURL.path)
     }
   } catch {
     log("meeting: could not save the remembered voices: \(error)")

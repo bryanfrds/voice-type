@@ -262,6 +262,11 @@ check("a known name is only changed at the start of transcript lines",
       "- [ ] Ann: call Ann\n[0:00] Anna: Ann speaking.")
 check("a $ in a name stays itself", renamingSpeaker(in: "[0:00] Speaker 2: Hi", from: "Speaker 2", to: "$1 Jo"), "[0:00] $1 Jo: Hi")
 check("a blank name renames nothing", renamingSpeaker(in: roomNote, from: "Speaker 1", to: " "), roomNote)
+check("a name containing its own label isn't put in twice",
+      renamingSpeaker(in: "[0:00] Speaker 1: Hi", from: "Speaker 1", to: "Speaker 1 (Zach)"), "[0:00] Speaker 1 (Zach): Hi")
+check("typed names are trimmed; VoiceType's own labels can't be names",
+      ["  Zach ", "", "Room", "you", "OTHERS", "Speaker 3", "speaker 12", "Speaker Jo"].map(usableName),
+      ["Zach", nil, nil, nil, nil, nil, nil, "Speaker Jo"])
 let labelled = [Segment(start: 0, speaker: "Speaker 1", text: "First words from one.", end: 1000),
                 Segment(start: 1000, speaker: "Speaker 2", text: "Then two.", end: 2000),
                 Segment(start: 2000, speaker: "Speaker 3", text: "Three, after the mic changed.", end: 3000),

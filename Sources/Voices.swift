@@ -105,20 +105,29 @@ func savedVoices(from data: Data?) -> [SavedVoice] {
 func renamingSpeaker(in note: String, from label: String, to name: String) -> String {
   let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
   guard !name.isEmpty, name != label else { return note }
-  let lines = note.components(separatedBy: "\n").map { line -> String in
+  if speakerNumber(label) != nil {
+    // One pass over the whole note, transcript included, so a name containing its own label
+    // isn't renamed twice. "Speaker 1" but not "Speaker 12"; the replacement is escaped so
+    // "$" in a name stays itself.
+    return note.replacingOccurrences(of: NSRegularExpression.escapedPattern(for: label) + #"(?!\d)"#,
+                                     with: NSRegularExpression.escapedTemplate(for: name), options: .regularExpression)
+  }
+  return note.components(separatedBy: "\n").map { line -> String in
     guard line.hasPrefix("["), let close = line.range(of: "] ") else { return line }
     let rest = line[close.upperBound...]
     guard rest.hasPrefix(label + ": ") else { return line }
     return String(line[..<close.upperBound]) + name + rest.dropFirst(label.count)
-  }
-  var renamed = lines.joined(separator: "\n")
-  if label.range(of: #"^Speaker \d+$"#, options: .regularExpression) != nil {
-    // "Speaker 1" but not "Speaker 12"; the replacement is escaped so "$" in a name stays itself.
-    let template = NSRegularExpression.escapedTemplate(for: name)
-    renamed = renamed.replacingOccurrences(of: NSRegularExpression.escapedPattern(for: label) + #"(?!\d)"#,
-                                           with: template, options: .regularExpression)
-  }
-  return renamed
+  }.joined(separator: "\n")
+}
+
+// A typed name, trimmed, or nil when it can't be used: empty, or one of the labels VoiceType
+// gives by itself ("Speaker 3", "Room", "You", "Others"), which would be mistaken for them.
+func usableName(_ typed: String) -> String? {
+  let name = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+  let reserved = ["room", "you", "others"]
+  guard !name.isEmpty, !reserved.contains(name.lowercased()),
+        name.range(of: #"^speaker\s*\d+$"#, options: [.regularExpression, .caseInsensitive]) == nil else { return nil }
+  return name
 }
 
 // A room meeting's labelled segments with known voices given their saved names, and its

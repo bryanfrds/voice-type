@@ -77,6 +77,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
   var meeting: MeetingRecording?
   var meetingTimer: Timer?
   var naming: SpeakerNaming?  // the "Who spoke?" window while it's open
+  var waitingToName: [(speakers: [MeetingSpeaker], note: URL)] = []  // meetings finished meanwhile
   let forgetItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
   var pasteCancelled = false
   let warningItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -318,11 +319,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
             NSWorkspace.shared.open(note.file)
             return
           }
-          self.naming = SpeakerNaming(speakers: note.speakers, note: note.file) {
-            self.naming = nil
-            NSWorkspace.shared.open(note.file)
-          }
-          self.naming?.show()
+          self.askWhoSpoke(note.speakers, note: note.file)
         }
       }
       return
@@ -387,6 +384,24 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let remembered = loadSavedVoices().count
     forgetItem.isHidden = remembered == 0
     forgetItem.title = "Forget remembered voices (\(remembered))"
+  }
+
+  // Shows "Who spoke?" for a meeting, then opens its note. One window at a time: a meeting that
+  // finishes while one is open waits its turn, so neither loses its names or its note.
+  func askWhoSpoke(_ speakers: [MeetingSpeaker], note: URL) {
+    guard naming == nil else {
+      waitingToName.append((speakers, note))
+      return
+    }
+    naming = SpeakerNaming(speakers: speakers, note: note) {
+      self.naming = nil
+      NSWorkspace.shared.open(note)
+      if !self.waitingToName.isEmpty {
+        let next = self.waitingToName.removeFirst()
+        self.askWhoSpoke(next.speakers, note: next.note)
+      }
+    }
+    naming?.show()
   }
 
   // Deletes every saved voiceprint, after asking. Notes already written keep their names.

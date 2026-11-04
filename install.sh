@@ -40,7 +40,7 @@ if [ "$(uname -m)" = arm64 ] && { [ ! -x "$model_dir/sherpa-onnx-offline-speaker
   clang -O2 -I"$tmp/$root/include" -o "$model_dir/voice-type-voiceprint" Helper/voiceprint.c -L"$tmp/$root/lib" \
     -lsherpa-onnx-c-api -lsherpa-onnx-core -lkaldi-decoder-core -lsherpa-onnx-kaldifst-core -lsherpa-onnx-fstfar \
     -lsherpa-onnx-fst -lkaldi-native-fbank-core -lkissfft-float -lssentencepiece_core -lonnxruntime -lc++ \
-    -framework Foundation
+    -framework Foundation || echo "Couldn't build voice-type-voiceprint: voices are told apart but not remembered."
   rm -rf "$tmp"
 fi
 if [ "$(uname -m)" = arm64 ] && [ ! -f "$model_dir/speaker-segmentation.onnx" ]; then

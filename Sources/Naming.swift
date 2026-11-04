@@ -11,7 +11,9 @@ final class SpeakerNaming: NSObject, NSWindowDelegate {
   private var done: (() -> Void)?
 
   init(speakers: [MeetingSpeaker], note: URL, done: @escaping () -> Void) {
-    self.speakers = speakers
+    // Only people not known yet: their "Speaker n" labels are unique in the note, so renaming one
+    // can't touch anyone else (a known name can appear on two people after a mic change).
+    self.speakers = speakers.filter { $0.known == nil }
     self.note = note
     self.done = done
     window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 200),
@@ -26,14 +28,14 @@ final class SpeakerNaming: NSObject, NSWindowDelegate {
       "Name the people in this meeting and VoiceType will know their voices next time. Leave a box empty to skip someone.")
     intro.textColor = .secondaryLabelColor
     var rows: [[NSView]] = []
-    for speaker in speakers {
+    for speaker in self.speakers {
       let label = NSTextField(labelWithString: speaker.label)
       label.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
       let said = NSTextField(labelWithString: "“\(speaker.said)”")
       said.textColor = .secondaryLabelColor
       said.lineBreakMode = .byTruncatingTail
       said.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-      let field = NSTextField(string: speaker.known ?? "")
+      let field = NSTextField(string: "")
       field.placeholderString = "Name"
       field.widthAnchor.constraint(equalToConstant: 140).isActive = true
       fields.append(field)
@@ -84,8 +86,10 @@ final class SpeakerNaming: NSObject, NSWindowDelegate {
     var text = (try? String(contentsOf: note, encoding: .utf8)) ?? ""
     var named = 0
     for (speaker, field) in zip(speakers, fields) {
-      let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-      guard !name.isEmpty else { continue }
+      guard let name = usableName(field.stringValue) else {
+        if !field.stringValue.trimmingCharacters(in: .whitespaces).isEmpty { log("meeting: skipped a name VoiceType uses itself") }
+        continue
+      }
       saved = remembering(name, print: speaker.print, in: saved)
       text = renamingSpeaker(in: text, from: speaker.label, to: name)
       named += 1
@@ -107,6 +111,7 @@ final class SpeakerNaming: NSObject, NSWindowDelegate {
   private func finish(closing: Bool = true) {
     guard let done else { return }
     self.done = nil
+    window.delegate = nil
     if closing { window.close() }
     done()
   }
