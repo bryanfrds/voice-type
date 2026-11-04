@@ -142,7 +142,8 @@ let summaryInstructions = """
   You write meeting notes from a transcript. On a call, "You" is the person who recorded the \
   meeting and "Others" is everyone heard through the call. In a room, one microphone heard \
   everyone: "Speaker 1", "Speaker 2" and so on are people told apart by their voices, \
-  automatically, so two people can be mixed up, and "Room" means they couldn't be told apart. \
+  automatically, so two people can be mixed up; a name instead is someone whose voice was \
+  recognised from an earlier meeting; and "Room" means they couldn't be told apart. \
   Name an owner for an action item only when the transcript says who it is, else use their \
   speaker label, or "someone" for "Room". The transcript comes from speech recognition, so \
   fix obvious mishearings from context, and never invent facts, names, dates \
