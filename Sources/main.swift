@@ -76,6 +76,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
   let meetingItem = NSMenuItem(title: "Start meeting notes", action: nil, keyEquivalent: "")
   var meeting: MeetingRecording?
   var meetingTimer: Timer?
+  var naming: SpeakerNaming?  // the "Who spoke?" window while it's open
+  let forgetItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
   var pasteCancelled = false
   let warningItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
   var warningPane = ""
@@ -107,6 +109,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let notesItem = NSMenuItem(title: "Open Meeting Notes folder", action: #selector(openNotesFolder), keyEquivalent: "")
     notesItem.target = self
     menu.addItem(notesItem)
+    forgetItem.target = self
+    forgetItem.action = #selector(forgetVoices)
+    forgetItem.isHidden = true
+    menu.addItem(forgetItem)
     menu.addItem(.separator())
     lastItem.target = self
     menu.addItem(lastItem)
@@ -306,7 +312,17 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         await MainActor.run {
           self.meetingItem.title = "Start meeting notes"
           self.meetingItem.action = #selector(self.toggleMeeting)
-          if let note { NSWorkspace.shared.open(note) } else { self.say("Couldn't save the meeting notes") }
+          guard let note else { return self.say("Couldn't save the meeting notes") }
+          // Asked only when someone's voice isn't known yet; the note opens after, with the names.
+          guard note.speakers.contains(where: { $0.known == nil }) else {
+            NSWorkspace.shared.open(note.file)
+            return
+          }
+          self.naming = SpeakerNaming(speakers: note.speakers, note: note.file) {
+            self.naming = nil
+            NSWorkspace.shared.open(note.file)
+          }
+          self.naming?.show()
         }
       }
       return
@@ -368,6 +384,23 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
   func menuNeedsUpdate(_ menu: NSMenu) {
     if checkPermissions() && state == .idle && tap != nil { show("mic", tint: nil) }
+    let remembered = loadSavedVoices().count
+    forgetItem.isHidden = remembered == 0
+    forgetItem.title = "Forget remembered voices (\(remembered))"
+  }
+
+  // Deletes every saved voiceprint, after asking. Notes already written keep their names.
+  @objc func forgetVoices() {
+    let names = loadSavedVoices().map(\.name)
+    let alert = NSAlert()
+    alert.messageText = "Forget \(names.count == 1 ? "1 voice" : "\(names.count) voices")?"
+    alert.informativeText = "VoiceType will stop recognising \(ListFormatter.localizedString(byJoining: names)) in meetings. Notes already written keep their names."
+    alert.addButton(withTitle: "Forget")
+    alert.addButton(withTitle: "Cancel")
+    NSApp.activate(ignoringOtherApps: true)
+    guard alert.runModal() == .alertFirstButtonReturn else { return }
+    storeSavedVoices([])
+    log("meeting: forgot \(names.count) remembered voices")
   }
 
   @objc func openWarningPane() {
