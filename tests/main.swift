@@ -314,6 +314,16 @@ check("a note with a summary has no missing line", full.contains("_No summary"),
 check("one audio file: no step count", transcribingStep(1, of: 1), "Transcribing meeting…")
 check("several files: which one of how many", transcribingStep(2, of: 3), "Transcribing meeting 2 of 3…")
 
+check("a silent call side: nobody heard", nobodyHeard([]), true)
+check("only Whisper's silence filler: nobody heard",
+      nobodyHeard([Segment(start: 0, speaker: "Others", text: "Thank you."),
+                   Segment(start: 30000, speaker: "Others", text: " thank you "),
+                   Segment(start: 60000, speaker: "Others", text: "Thanks for watching!")]), true)
+check("real speech on the call: someone heard", nobodyHeard(others), false)
+check("filler plus real speech: someone heard",
+      nobodyHeard([Segment(start: 0, speaker: "Others", text: "Thank you."),
+                   Segment(start: 9000, speaker: "Others", text: "Thank you, that works.")]), false)
+
 let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("vt-notes-\(getpid())")
 let notesFolder = scratch.appendingPathComponent("Meeting Notes")
 check("a missing notes folder is made", existingFolder(notesFolder), notesFolder)

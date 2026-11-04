@@ -100,6 +100,19 @@ private func distance(_ span: VoiceSpan, _ start: Int, _ end: Int) -> Int {
   max(0, span.start - end, start - span.end)
 }
 
+// What Whisper writes for silence instead of nothing: on a call side where no one spoke it
+// "hears" "Thank you." every 30 seconds. Compared without case, spaces or punctuation.
+private let silenceFiller: Set<String> = ["thankyou", "thankyouverymuch", "thankyouforwatching",
+                                          "thanksforwatching", "thanks", "bye", "you"]
+
+// Whether nobody was really heard: no segments, or only silence filler. A room meeting with
+// the Mac's sound recorded but silent looks like this on the call side.
+func nobodyHeard(_ segments: [Segment]) -> Bool {
+  segments.allSatisfy { segment in
+    silenceFiller.contains(segment.text.lowercased().filter { $0.isLetter })
+  }
+}
+
 // Both sides in time order, with a speaker's consecutive segments joined into one turn.
 func transcript(_ sides: [[Segment]]) -> String {
   let ordered = sides.flatMap { $0 }.enumerated()
