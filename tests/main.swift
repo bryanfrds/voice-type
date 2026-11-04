@@ -185,7 +185,16 @@ check("a tie goes to the voice whose name sorts first",
 check("shifting moves both ends", shifted([Segment(start: 100, speaker: "Room", text: "Hi.", end: 900)], by: 5000),
       [Segment(start: 5100, speaker: "Room", text: "Hi.", end: 5900)])
 check("only a room's words are cut short", [segmentOptions(for: "Room"), segmentOptions(for: "You"), segmentOptions(for: "Others")],
-      [["-ml", "50", "-sow"], [], []])
+      [["-mc", "0", "-ml", "50", "-sow"], ["-mc", "0"], ["-mc", "0"]])
+check("a looped phrase is kept once",
+      withoutRepeats("you get usage of... $20 a month? $20 a month? $20 a month? $20 a month? Okay."),
+      "you get usage of... $20 a month? Okay.")
+check("a looped word is kept once", withoutRepeats("16 16 16 16 17 Sub."), "16 17 Sub.")
+check("a long looped sentence is kept once",
+      withoutRepeats("Yeah, if you guys have caps, we'll see. Yeah, if you guys have caps, we'll see. yeah if you guys have caps we'll see"),
+      "Yeah, if you guys have caps, we'll see.")
+check("twice is left alone", withoutRepeats("Okay, okay. Two months Two months"), "Okay, okay. Two months Two months")
+check("a punctuation-only word doesn't swallow the line", withoutRepeats("Wait - - - what"), "Wait - what")
 var parts: [String: Int] = [:]
 let fileOne = labellingPart([room[0]], voices: [VoiceSpan(start: 0, end: 4000, speaker: "speaker_00")], part: 0, numbers: &parts)
 let fileTwo = labellingPart([Segment(start: 9000, speaker: "Room", text: "New mic.", end: 9500)],

@@ -39,7 +39,9 @@ func shifted(_ segments: [Segment], by offset: Int) -> [Segment] {
 // given to whoever was speaking (a speaker's run is joined again in the transcript). A call's
 // sides are already apart, so they're left whole.
 func segmentOptions(for speaker: String) -> [String] {
-  speaker == "Room" ? ["-ml", "50", "-sow"] : []
+  // "-mc 0": Whisper isn't fed its own earlier text. That feedback is what gets it stuck
+  // repeating one line ("$20 a month? $20 a month? ...") for minutes.
+  ["-mc", "0"] + (speaker == "Room" ? ["-ml", "50", "-sow"] : [])
 }
 
 // A stretch of time one voice was heard, from sherpa-onnx's speaker diarization. `speaker`
@@ -125,7 +127,29 @@ func transcript(_ sides: [[Segment]]) -> String {
       turns.append((segment.speaker, segment.start, segment.text))
     }
   }
-  return turns.map { "[\(clock($0.start))] \($0.speaker): \($0.text)" }.joined(separator: "\n")
+  return turns.map { "[\(clock($0.start))] \($0.speaker): \(withoutRepeats($0.text))" }.joined(separator: "\n")
+}
+
+// Text with a phrase said three or more times in a row kept once: what's left when Whisper
+// loops anyway ("$20 a month? $20 a month? $20 a month?" → "$20 a month?"). Phrases of up to
+// 12 words, compared without case or punctuation.
+func withoutRepeats(_ text: String) -> String {
+  let words = text.split(separator: " ").map(String.init)
+  let plain = words.map { $0.lowercased().filter { $0.isLetter || $0.isNumber } }
+  var kept: [String] = []
+  var i = 0
+  while i < words.count {
+    var skip = 0
+    for n in 1...12 where i + 3 * n <= words.count {
+      var times = 1
+      while i + (times + 1) * n <= words.count,
+            plain[(i + times * n)..<(i + (times + 1) * n)].elementsEqual(plain[i..<(i + n)]) { times += 1 }
+      if times >= 3 { kept += words[i..<(i + n)]; skip = n * times; break }
+    }
+    if skip == 0 { kept.append(words[i]); skip = 1 }
+    i += skip
+  }
+  return kept.joined(separator: " ")
 }
 
 // 754000 ms as "12:34", or "1:02:03" past an hour.
