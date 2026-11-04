@@ -43,10 +43,15 @@ folder** in the menu shows all of them.
 
 - **In a room:** everyone is heard through the one mic, so people are told apart by their
   voices: the transcript says "Speaker 1", "Speaker 2" and so on, numbered in the order they
-  first talk, each keeping their number. It can't know names, and two similar voices or people
-  talking over each other can get mixed up. This uses [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)
-  and two small models, which the installer downloads (about 300 MB, of which 70 MB is kept).
+  first talk, each keeping their number. Two similar voices or people talking over each other
+  can get mixed up. This uses [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)
+  and two small models, which the installer downloads (about 300 MB, of which 100 MB is kept).
   If you installed before this, run `./install.sh` again to get it.
+- **Remembering people:** after a room meeting, a **Who spoke?** window shows each new speaker
+  with something they said. Type their names and VoiceType saves their voiceprints, so later
+  meetings say "Zach" instead of "Speaker 2" (the window then only appears when someone new
+  talks). Voiceprints stay on this Mac in `~/.local/share/voice-type/voices.json`;
+  **Forget remembered voices** in the menu deletes them all. Ask people before saving theirs.
 - **Call audio:** the first time, macOS asks for Screen Recording. Without it, only the mic
   is recorded, which still works for a meeting in a room.
 - **Summary:** needs a DeepSeek API key. Put `DEEPSEEK_API_KEY=sk-...` in
