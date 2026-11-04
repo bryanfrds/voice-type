@@ -205,6 +205,79 @@ check("a mic file with no voices found stays Room, not someone from another file
 check("numbered speakers each get their own lines in the transcript",
       transcript([labellingSpeakers(room, spans: spans)]),
       "[0:00] Speaker 1: Okay Houston, we've had a problem.\n[0:04] Speaker 2: Say again, please.\n[0:06] Speaker 1: We've had a problem.")
+// Remembering voices between meetings.
+check("a print is just like itself", (likeness([1, 2, 3], [2, 4, 6]) * 1000).rounded(), 1000)
+check("opposite prints", likeness([1, 0], [-1, 0]), -1)
+check("prints of different lengths can't be compared", likeness([1, 0], [1, 0, 0]), 0)
+check("the helper's line of numbers is read", voiceprint(fromHelper: "0.5 -1 2e-3\n"), [0.5, -1, 0.002])
+check("an error message isn't a print", voiceprint(fromHelper: "too little speech\n"), nil)
+check("nothing isn't a print", voiceprint(fromHelper: ""), nil)
+let ann = SavedVoice(name: "Ann", print: [1, 0, 0], meetings: 1)
+let bob = SavedVoice(name: "Bob", print: [0, 1, 0], meetings: 1)
+check("a close voice gets the saved name, a far one doesn't",
+      knownVoices(["a": [0.9, 0.1, 0], "b": [0, 0, 1]], saved: [ann, bob]), ["a": "Ann"])
+check("two voices like the same person: the closer one gets the name, once",
+      knownVoices(["a": [0.8, 0.6, 0], "b": [0.95, 0.1, 0]], saved: [ann, bob]), ["b": "Ann", "a": "Bob"])
+check("a voice just under the line isn't anyone", knownVoices(["a": [0.49, 0.8717, 0]], saved: [ann], threshold: 0.5), [:])
+check("nothing saved, nobody known", knownVoices(["a": [1, 0, 0]], saved: []), [:])
+check("a new name is added, its print scaled to length 1",
+      remembering(" Cat ", print: [0, 0, 2], in: [ann]), [ann, SavedVoice(name: "Cat", print: [0, 0, 1], meetings: 1)])
+let annAgain = remembering("ann", print: [0, 1, 0], in: [ann, bob])
+check("a known name, any case, is averaged in and keeps its spelling",
+      annAgain.map { [$0.name, String($0.meetings)] }, [["Ann", "2"], ["Bob", "1"]])
+check("the average sits between the two meetings", annAgain[0].print.map { ($0 * 1000).rounded() / 1000 }, [0.707, 0.707, 0])
+check("a blank name changes nothing", remembering("  ", print: [1, 0, 0], in: [ann]), [ann])
+check("a print of another size changes nothing", remembering("Ann", print: [1, 0], in: [ann]), [ann])
+check("saved voices survive being written and read", savedVoices(from: try? JSONEncoder().encode([ann, bob])), [ann, bob])
+check("a missing or broken file is no voices", [savedVoices(from: nil), savedVoices(from: Data("{".utf8))], [[], []])
+let roomNote = """
+  # Meeting
+
+  ## Action items
+  - [ ] Speaker 1: send the deck
+  - [ ] Speaker 12: book the room
+
+  ## Transcript
+
+  [0:00] Speaker 1: Speaker 1 here, I'll send it.
+  [0:04] Speaker 12: And I'm Speaker 12.
+  [0:09] Speaker 1: Thanks.
+  """
+check("a Speaker label is renamed in the transcript and the summary, not touching Speaker 12",
+      renamingSpeaker(in: roomNote, from: "Speaker 1", to: "Zach"), """
+  # Meeting
+
+  ## Action items
+  - [ ] Zach: send the deck
+  - [ ] Speaker 12: book the room
+
+  ## Transcript
+
+  [0:00] Zach: Zach here, I'll send it.
+  [0:04] Speaker 12: And I'm Speaker 12.
+  [0:09] Zach: Thanks.
+  """)
+check("a known name is only changed at the start of transcript lines",
+      renamingSpeaker(in: "- [ ] Ann: call Ann\n[0:00] Ann: Ann speaking.", from: "Ann", to: "Anna"),
+      "- [ ] Ann: call Ann\n[0:00] Anna: Ann speaking.")
+check("a $ in a name stays itself", renamingSpeaker(in: "[0:00] Speaker 2: Hi", from: "Speaker 2", to: "$1 Jo"), "[0:00] $1 Jo: Hi")
+check("a blank name renames nothing", renamingSpeaker(in: roomNote, from: "Speaker 1", to: " "), roomNote)
+let labelled = [Segment(start: 0, speaker: "Speaker 1", text: "First words from one.", end: 1000),
+                Segment(start: 1000, speaker: "Speaker 2", text: "Then two.", end: 2000),
+                Segment(start: 2000, speaker: "Speaker 3", text: "Three, after the mic changed.", end: 3000),
+                Segment(start: 3000, speaker: "Speaker 1", text: "One again.", end: 4000)]
+let named = namingSpeakers(labelled, numbers: ["0-speaker_00": 1, "0-speaker_01": 2, "1-speaker_00": 3, "1-speaker_01": 4],
+                           prints: ["0-speaker_00": [1, 0, 0], "0-speaker_01": [0, 0, 1], "1-speaker_00": [0.9, 0.1, 0]],
+                           saved: [ann, bob])
+check("known voices get their names in every mic file", named.segments.map(\.speaker), ["Ann", "Speaker 2", "Ann", "Ann"])
+check("the window lists speakers with a print and words, in number order, with what they first said",
+      named.speakers.map { [$0.label, $0.said, $0.known ?? "-"] },
+      [["Ann", "First words from one.", "Ann"], ["Speaker 2", "Then two.", "-"], ["Ann", "Three, after the mic changed.", "Ann"]])
+check("no prints: nothing renamed, no one to name",
+      [namingSpeakers(labelled, numbers: ["0-speaker_00": 1], prints: [:], saved: [ann]).segments == labelled,
+       namingSpeakers(labelled, numbers: ["0-speaker_00": 1], prints: [:], saved: [ann]).speakers.isEmpty], [true, true])
+check("speaker numbers are read from labels", [speakerNumber("Speaker 3"), speakerNumber("Ann"), speakerNumber("Speaker x")], [3, nil, nil])
+
 check("minutes and seconds", clock(754_000), "12:34")
 check("hours when past an hour", clock(3_723_000), "1:02:03")
 var utc = Calendar(identifier: .gregorian)
