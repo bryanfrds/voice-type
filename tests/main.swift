@@ -191,10 +191,11 @@ check("a looped phrase is kept once",
       "you get usage of... $20 a month? Okay.")
 check("a looped word is kept once", withoutRepeats("16 16 16 16 17 Sub."), "16 17 Sub.")
 check("a long looped sentence is kept once",
-      withoutRepeats("Yeah, if you guys have caps, we'll see. Yeah, if you guys have caps, we'll see. yeah if you guys have caps we'll see"),
+      withoutRepeats("Yeah, if you guys have caps, we'll see. Yeah, if you guys have caps, we'll see. Yeah, if you guys have caps, we'll see. yeah if you guys have caps we'll see."),
       "Yeah, if you guys have caps, we'll see.")
-check("twice is left alone", withoutRepeats("Okay, okay. Two months Two months"), "Okay, okay. Two months Two months")
-check("a punctuation-only word doesn't swallow the line", withoutRepeats("Wait - - - what"), "Wait - what")
+check("three times is left alone", withoutRepeats("It's very, very, very important."), "It's very, very, very important.")
+check("a looped word keeps the sentence's full stop", withoutRepeats("Ha ha ha ha. Next"), "Ha. Next")
+check("a punctuation-only word doesn't swallow the line", withoutRepeats("Wait - - - - what"), "Wait - what")
 var parts: [String: Int] = [:]
 let fileOne = labellingPart([room[0]], voices: [VoiceSpan(start: 0, end: 4000, speaker: "speaker_00")], part: 0, numbers: &parts)
 let fileTwo = labellingPart([Segment(start: 9000, speaker: "Room", text: "New mic.", end: 9500)],

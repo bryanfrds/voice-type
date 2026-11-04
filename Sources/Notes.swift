@@ -130,9 +130,10 @@ func transcript(_ sides: [[Segment]]) -> String {
   return turns.map { "[\(clock($0.start))] \($0.speaker): \(withoutRepeats($0.text))" }.joined(separator: "\n")
 }
 
-// Text with a phrase said three or more times in a row kept once: what's left when Whisper
-// loops anyway ("$20 a month? $20 a month? $20 a month?" → "$20 a month?"). Phrases of up to
-// 12 words, compared without case or punctuation.
+// Text with a phrase said four or more times in a row kept once: what's left when Whisper
+// loops anyway ("$20 a month? $20 a month? ..." → "$20 a month?"). Phrases of up to 12 words,
+// compared without case or punctuation. Three times is left alone, since people do say "very,
+// very, very". The kept copy ends with the last copy's punctuation, so a sentence still ends.
 func withoutRepeats(_ text: String) -> String {
   let words = text.split(separator: " ").map(String.init)
   let plain = words.map { $0.lowercased().filter { $0.isLetter || $0.isNumber } }
@@ -140,11 +141,15 @@ func withoutRepeats(_ text: String) -> String {
   var i = 0
   while i < words.count {
     var skip = 0
-    for n in 1...12 where i + 3 * n <= words.count {
+    for n in 1...12 where i + 4 * n <= words.count {
       var times = 1
       while i + (times + 1) * n <= words.count,
             plain[(i + times * n)..<(i + (times + 1) * n)].elementsEqual(plain[i..<(i + n)]) { times += 1 }
-      if times >= 3 { kept += words[i..<(i + n)]; skip = n * times; break }
+      if times >= 4 {
+        var copy = Array(words[i..<(i + n)])
+        copy[n - 1] = withEnding(of: words[i + n * times - 1], on: copy[n - 1])
+        kept += copy; skip = n * times; break
+      }
     }
     if skip == 0 { kept.append(words[i]); skip = 1 }
     i += skip
@@ -258,4 +263,10 @@ func deepSeekKey(environment: [String: String], config: String?) -> String? {
 // The menu's progress line while a meeting is transcribed, one step per audio file.
 func transcribingStep(_ step: Int, of total: Int) -> String {
   total > 1 ? "Transcribing meeting \(step) of \(total)…" : "Transcribing meeting…"
+}
+
+// `word` with `other`'s trailing punctuation in place of its own: "ha" and "ha." → "ha.".
+private func withEnding(of other: String, on word: String) -> String {
+  let ending = { (w: String) in w.reversed().prefix { !$0.isLetter && !$0.isNumber }.count }
+  return String(word.dropLast(ending(word))) + String(other.suffix(ending(other)))
 }
