@@ -185,7 +185,17 @@ check("a tie goes to the voice whose name sorts first",
 check("shifting moves both ends", shifted([Segment(start: 100, speaker: "Room", text: "Hi.", end: 900)], by: 5000),
       [Segment(start: 5100, speaker: "Room", text: "Hi.", end: 5900)])
 check("only a room's words are cut short", [segmentOptions(for: "Room"), segmentOptions(for: "You"), segmentOptions(for: "Others")],
-      [["-ml", "50", "-sow"], [], []])
+      [["-mc", "0", "-ml", "50", "-sow"], ["-mc", "0"], ["-mc", "0"]])
+check("a looped phrase is kept once",
+      withoutRepeats("you get usage of... $20 a month? $20 a month? $20 a month? $20 a month? Okay."),
+      "you get usage of... $20 a month? Okay.")
+check("a looped word is kept once", withoutRepeats("16 16 16 16 17 Sub."), "16 17 Sub.")
+check("a long looped sentence is kept once",
+      withoutRepeats("Yeah, if you guys have caps, we'll see. Yeah, if you guys have caps, we'll see. Yeah, if you guys have caps, we'll see. yeah if you guys have caps we'll see."),
+      "Yeah, if you guys have caps, we'll see.")
+check("three times is left alone", withoutRepeats("It's very, very, very important."), "It's very, very, very important.")
+check("a looped word keeps the sentence's full stop", withoutRepeats("Ha ha ha ha. Next"), "Ha. Next")
+check("a punctuation-only word doesn't swallow the line", withoutRepeats("Wait - - - - what"), "Wait - what")
 var parts: [String: Int] = [:]
 let fileOne = labellingPart([room[0]], voices: [VoiceSpan(start: 0, end: 4000, speaker: "speaker_00")], part: 0, numbers: &parts)
 let fileTwo = labellingPart([Segment(start: 9000, speaker: "Room", text: "New mic.", end: 9500)],
@@ -313,6 +323,16 @@ check("a note with a summary puts it before the transcript",
 check("a note with a summary has no missing line", full.contains("_No summary"), false)
 check("one audio file: no step count", transcribingStep(1, of: 1), "Transcribing meeting…")
 check("several files: which one of how many", transcribingStep(2, of: 3), "Transcribing meeting 2 of 3…")
+
+check("a silent call side: nobody heard", nobodyHeard([]), true)
+check("only Whisper's silence filler: nobody heard",
+      nobodyHeard([Segment(start: 0, speaker: "Others", text: "Thank you."),
+                   Segment(start: 30000, speaker: "Others", text: " thank you "),
+                   Segment(start: 60000, speaker: "Others", text: "Thanks for watching!")]), true)
+check("real speech on the call: someone heard", nobodyHeard(others), false)
+check("filler plus real speech: someone heard",
+      nobodyHeard([Segment(start: 0, speaker: "Others", text: "Thank you."),
+                   Segment(start: 9000, speaker: "Others", text: "Thank you, that works.")]), false)
 
 let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("vt-notes-\(getpid())")
 let notesFolder = scratch.appendingPathComponent("Meeting Notes")

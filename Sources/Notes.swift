@@ -39,7 +39,9 @@ func shifted(_ segments: [Segment], by offset: Int) -> [Segment] {
 // given to whoever was speaking (a speaker's run is joined again in the transcript). A call's
 // sides are already apart, so they're left whole.
 func segmentOptions(for speaker: String) -> [String] {
-  speaker == "Room" ? ["-ml", "50", "-sow"] : []
+  // "-mc 0": Whisper isn't fed its own earlier text. That feedback is what gets it stuck
+  // repeating one line ("$20 a month? $20 a month? ...") for minutes.
+  ["-mc", "0"] + (speaker == "Room" ? ["-ml", "50", "-sow"] : [])
 }
 
 // A stretch of time one voice was heard, from sherpa-onnx's speaker diarization. `speaker`
@@ -100,6 +102,19 @@ private func distance(_ span: VoiceSpan, _ start: Int, _ end: Int) -> Int {
   max(0, span.start - end, start - span.end)
 }
 
+// What Whisper writes for silence instead of nothing: on a call side where no one spoke it
+// "hears" "Thank you." every 30 seconds. Compared without case, spaces or punctuation.
+private let silenceFiller: Set<String> = ["thankyou", "thankyouverymuch", "thankyouforwatching",
+                                          "thanksforwatching", "thanks", "bye", "you"]
+
+// Whether nobody was really heard: no segments, or only silence filler. A room meeting with
+// the Mac's sound recorded but silent looks like this on the call side.
+func nobodyHeard(_ segments: [Segment]) -> Bool {
+  segments.allSatisfy { segment in
+    silenceFiller.contains(segment.text.lowercased().filter { $0.isLetter })
+  }
+}
+
 // Both sides in time order, with a speaker's consecutive segments joined into one turn.
 func transcript(_ sides: [[Segment]]) -> String {
   let ordered = sides.flatMap { $0 }.enumerated()
@@ -112,7 +127,34 @@ func transcript(_ sides: [[Segment]]) -> String {
       turns.append((segment.speaker, segment.start, segment.text))
     }
   }
-  return turns.map { "[\(clock($0.start))] \($0.speaker): \($0.text)" }.joined(separator: "\n")
+  return turns.map { "[\(clock($0.start))] \($0.speaker): \(withoutRepeats($0.text))" }.joined(separator: "\n")
+}
+
+// Text with a phrase said four or more times in a row kept once: what's left when Whisper
+// loops anyway ("$20 a month? $20 a month? ..." → "$20 a month?"). Phrases of up to 12 words,
+// compared without case or punctuation. Three times is left alone, since people do say "very,
+// very, very". The kept copy ends with the last copy's punctuation, so a sentence still ends.
+func withoutRepeats(_ text: String) -> String {
+  let words = text.split(separator: " ").map(String.init)
+  let plain = words.map { $0.lowercased().filter { $0.isLetter || $0.isNumber } }
+  var kept: [String] = []
+  var i = 0
+  while i < words.count {
+    var skip = 0
+    for n in 1...12 where i + 4 * n <= words.count {
+      var times = 1
+      while i + (times + 1) * n <= words.count,
+            plain[(i + times * n)..<(i + (times + 1) * n)].elementsEqual(plain[i..<(i + n)]) { times += 1 }
+      if times >= 4 {
+        var copy = Array(words[i..<(i + n)])
+        copy[n - 1] = withEnding(of: words[i + n * times - 1], on: copy[n - 1])
+        kept += copy; skip = n * times; break
+      }
+    }
+    if skip == 0 { kept.append(words[i]); skip = 1 }
+    i += skip
+  }
+  return kept.joined(separator: " ")
 }
 
 // 754000 ms as "12:34", or "1:02:03" past an hour.
@@ -221,4 +263,10 @@ func deepSeekKey(environment: [String: String], config: String?) -> String? {
 // The menu's progress line while a meeting is transcribed, one step per audio file.
 func transcribingStep(_ step: Int, of total: Int) -> String {
   total > 1 ? "Transcribing meeting \(step) of \(total)…" : "Transcribing meeting…"
+}
+
+// `word` with `other`'s trailing punctuation in place of its own: "ha" and "ha." → "ha.".
+private func withEnding(of other: String, on word: String) -> String {
+  let ending = { (w: String) in w.reversed().prefix { !$0.isLetter && !$0.isNumber }.count }
+  return String(word.dropLast(ending(word))) + String(other.suffix(ending(other)))
 }

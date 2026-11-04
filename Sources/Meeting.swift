@@ -349,9 +349,11 @@ func writeNotes(_ recording: MeetingRecording, progress: @escaping (String) asyn
   let parts = recording.micParts
   let steps = parts.count + 1
   await progress(transcribingStep(1, of: steps))
-  let call = await meetingSegments(recording.callURL, speaker: "Others", length: length)
-  // With no one heard through the Mac, it was a room: everyone is on the mic. (If the call
-  // side failed, that can't be told, so the mic stays "You".)
+  var call = await meetingSegments(recording.callURL, speaker: "Others", length: length)
+  // With no one heard through the Mac, it was a room: everyone is on the mic. Whisper's filler
+  // for silence ("Thank you.") doesn't count, and is left out of the note. (If the call side
+  // failed, that can't be told, so the mic stays "You".)
+  if let found = call, nobodyHeard(found) { call = [] }
   let micSpeaker = call?.isEmpty == true ? "Room" : "You"
   var mic: [Segment] = []
   var numbers: [String: Int] = [:]  // speaker numbers, kept across the mic files
