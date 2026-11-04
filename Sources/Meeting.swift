@@ -226,12 +226,52 @@ let voicePrinter = modelDir + "nemo_en_titanet_small.onnx"
 // four of sherpa-onnx's test recordings (two to four people, English and Chinese).
 let sameVoice = "0.85"
 
-// Who was speaking when in a recording, shifted by `offset` ms. Only a help for reading the
-// transcript, so a missing tool or a failure gives [] and loses nothing.
-func meetingVoices(_ url: URL, offset: Int = 0, length: TimeInterval) async -> [VoiceSpan] {
+// Makes one voiceprint per person from a 16 kHz recording; install.sh builds it from
+// Helper/voiceprint.c. Without it, voices are still told apart, just not remembered.
+let voiceprintTool = modelDir + "voice-type-voiceprint"
+// The names given to voices in earlier meetings, with their voiceprints. Only on this Mac.
+let savedVoicesURL = URL(fileURLWithPath: modelDir + "voices.json")
+
+func loadSavedVoices() -> [SavedVoice] {
+  savedVoices(from: FileManager.default.contents(atPath: savedVoicesURL.path))
+}
+
+func storeSavedVoices(_ voices: [SavedVoice]) {
+  do {
+    if voices.isEmpty {
+      if FileManager.default.fileExists(atPath: savedVoicesURL.path) { try FileManager.default.removeItem(at: savedVoicesURL) }
+    } else {
+      try JSONEncoder().encode(voices).write(to: savedVoicesURL, options: .atomic)
+    }
+  } catch {
+    log("meeting: could not save the remembered voices: \(error)")
+  }
+}
+
+// Each voice's voiceprint, from all the stretches it was heard in `small` (the 16 kHz copy).
+// A voice with too little speech, or a missing tool, has none.
+func voiceprints(_ spans: [VoiceSpan], in small: URL, length: TimeInterval) async -> [String: [Float]] {
+  guard FileManager.default.isExecutableFile(atPath: voiceprintTool) else { return [:] }
+  var prints: [String: [Float]] = [:]
+  for (voice, own) in Dictionary(grouping: spans, by: \.speaker).sorted(by: { $0.key < $1.key }) {
+    let output = URL(fileURLWithPath: small.deletingPathExtension().path + "-\(voice).txt")
+    let times = own.flatMap { [String($0.start), String($0.end)] }
+    if await runTool(voiceprintTool, [voicePrinter, small.path] + times, output: output, on: small,
+                     length: length, purpose: "making a voiceprint from"),
+       let text = try? String(contentsOf: output, encoding: .utf8), let print = voiceprint(fromHelper: text) {
+      prints[voice] = print
+    }
+  }
+  return prints
+}
+
+// Who was speaking when in a recording, shifted by `offset` ms, and each voice's voiceprint.
+// Only a help for reading the transcript, so a missing tool or a failure gives nothing and
+// loses nothing.
+func meetingVoices(_ url: URL, offset: Int = 0, length: TimeInterval) async -> (spans: [VoiceSpan], prints: [String: [Float]]) {
   let files = [diarizer, voiceFinder, voicePrinter]
   guard FileManager.default.fileExists(atPath: url.path),
-        files.allSatisfy({ FileManager.default.fileExists(atPath: $0) }) else { return [] }
+        files.allSatisfy({ FileManager.default.fileExists(atPath: $0) }) else { return ([], [:]) }
   // The diarizer only takes 16 kHz mono; the mic records at whatever the device gives.
   let base = url.deletingPathExtension().path
   let small = URL(fileURLWithPath: base + "-16k.wav")
@@ -241,10 +281,10 @@ func meetingVoices(_ url: URL, offset: Int = 0, length: TimeInterval) async -> [
         await runTool(diarizer, ["--segmentation.pyannote-model=" + voiceFinder, "--embedding.model=" + voicePrinter,
                                  "--clustering.cluster-threshold=" + sameVoice, small.path],
                       output: output, on: url, length: length, purpose: "telling voices apart in"),
-        let text = try? String(contentsOf: output, encoding: .utf8) else { return [] }
-  return voiceSpans(fromDiarization: text).map {
-    VoiceSpan(start: $0.start + offset, end: $0.end + offset, speaker: $0.speaker)
-  }
+        let text = try? String(contentsOf: output, encoding: .utf8) else { return ([], [:]) }
+  let spans = voiceSpans(fromDiarization: text)
+  let prints = await voiceprints(spans, in: small, length: length)
+  return (spans.map { VoiceSpan(start: $0.start + offset, end: $0.end + offset, speaker: $0.speaker) }, prints)
 }
 
 // Asks DeepSeek for the summary. Returns it, or nil with the reason to show in the note.
@@ -299,10 +339,10 @@ func keepAudio(_ folder: URL, started: Date, label: String) -> URL? {
   return target
 }
 
-// From a stopped recording to a note in ~/Documents/Meeting Notes, opened when ready. The
+// From a stopped recording to a note in ~/Documents/Meeting Notes, with a room's speakers to name. The
 // audio is deleted once the transcript is in the note; if Whisper failed, it's kept beside it.
 // `progress` hears each step ("Transcribing 1 of 2…", "Summarizing…").
-func writeNotes(_ recording: MeetingRecording, progress: @escaping (String) async -> Void = { _ in }) async -> URL? {
+func writeNotes(_ recording: MeetingRecording, progress: @escaping (String) async -> Void = { _ in }) async -> (file: URL, speakers: [MeetingSpeaker])? {
   let length = Date().timeIntervalSince(recording.started)
   let parts = recording.micParts
   let steps = parts.count + 1
@@ -313,6 +353,7 @@ func writeNotes(_ recording: MeetingRecording, progress: @escaping (String) asyn
   let micSpeaker = call?.isEmpty == true ? "Room" : "You"
   var mic: [Segment] = []
   var numbers: [String: Int] = [:]  // speaker numbers, kept across the mic files
+  var prints: [String: [Float]] = [:]  // keyed like `numbers`
   var micFailed = false
   for (i, part) in parts.enumerated() {
     await progress(transcribingStep(i + 2, of: steps))
@@ -320,12 +361,18 @@ func writeNotes(_ recording: MeetingRecording, progress: @escaping (String) asyn
       if micSpeaker == "Room", !found.isEmpty {
         await progress("Telling voices apart…")
         let voices = await meetingVoices(part.url, offset: part.offset, length: length)
-        found = labellingPart(found, voices: voices, part: i, numbers: &numbers)
+        found = labellingPart(found, voices: voices.spans, part: i, numbers: &numbers)
+        for (voice, print) in voices.prints { prints["\(i)-\(voice)"] = print }
       }
       mic += found
     } else {
       micFailed = true  // the other parts still go in the note; the audio is kept
     }
+  }
+  let named = namingSpeakers(mic, numbers: numbers, prints: prints, saved: loadSavedVoices())
+  mic = named.segments
+  if !named.speakers.isEmpty {
+    log("meeting: \(named.speakers.count) voiceprints, \(named.speakers.filter { $0.known != nil }.count) known")
   }
   let failed = call == nil || micFailed
   let text = transcript([mic, call ?? []])
@@ -350,7 +397,7 @@ func writeNotes(_ recording: MeetingRecording, progress: @escaping (String) asyn
   }
   if !failed { try? FileManager.default.removeItem(at: recording.folder) }
   log("meeting: \(Int(length))s, \(mic.count + (call ?? []).count) segments\(failed ? ", transcription failed" : ""), saved \(file.lastPathComponent)")
-  return file
+  return (file, named.speakers)
 }
 
 // Meetings left in the temp folder by a quit or crash: moved beside the notes, not deleted.
