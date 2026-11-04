@@ -27,12 +27,20 @@ fetch() {  # url, sha256, destination
   mv "$3.part" "$3"
 }
 # Its tool is built for Apple silicon only; without it, a room's speakers are all "Room".
-if [ "$(uname -m)" = arm64 ] && [ ! -x "$model_dir/sherpa-onnx-offline-speaker-diarization" ]; then
+# The same download has its C library, which voice-type-voiceprint (Helper/voiceprint.c) is
+# built against to remember voices between meetings.
+if [ "$(uname -m)" = arm64 ] && { [ ! -x "$model_dir/sherpa-onnx-offline-speaker-diarization" ] ||
+                                  [ ! -x "$model_dir/voice-type-voiceprint" ]; }; then
   tmp=$(mktemp -d)
   fetch "$sherpa/v1.13.8/sherpa-onnx-v1.13.8-osx-arm64-static-no-tts.tar.bz2" \
     1038a379fff5365b684e05cbbb9ab3577c1a2f6b1736a4d53a6746860d7eddd4 "$tmp/sherpa.tar.bz2"
-  tar xjf "$tmp/sherpa.tar.bz2" -C "$tmp" sherpa-onnx-v1.13.8-osx-arm64-static-no-tts/bin/sherpa-onnx-offline-speaker-diarization
-  mv "$tmp/sherpa-onnx-v1.13.8-osx-arm64-static-no-tts/bin/sherpa-onnx-offline-speaker-diarization" "$model_dir/"
+  root=sherpa-onnx-v1.13.8-osx-arm64-static-no-tts
+  tar xjf "$tmp/sherpa.tar.bz2" -C "$tmp" "$root/bin/sherpa-onnx-offline-speaker-diarization" "$root/include" "$root/lib"
+  mv "$tmp/$root/bin/sherpa-onnx-offline-speaker-diarization" "$model_dir/"
+  clang -O2 -I"$tmp/$root/include" -o "$model_dir/voice-type-voiceprint" Helper/voiceprint.c -L"$tmp/$root/lib" \
+    -lsherpa-onnx-c-api -lsherpa-onnx-core -lkaldi-decoder-core -lsherpa-onnx-kaldifst-core -lsherpa-onnx-fstfar \
+    -lsherpa-onnx-fst -lkaldi-native-fbank-core -lkissfft-float -lssentencepiece_core -lonnxruntime -lc++ \
+    -framework Foundation
   rm -rf "$tmp"
 fi
 if [ "$(uname -m)" = arm64 ] && [ ! -f "$model_dir/speaker-segmentation.onnx" ]; then
